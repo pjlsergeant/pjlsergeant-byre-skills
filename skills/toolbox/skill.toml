@@ -1,0 +1,23 @@
+[package]
+id = "pjlsergeant/toolbox"
+version = "1.0.0"
+kind = "skill"
+package_api = 1
+requires_byre = ">=0.1.10"
+
+[build]
+apt = [
+  "ripgrep",   # rg — fast recursive search
+  "fd-find",   # fast file find (Debian binary is `fdfind`; symlinked to `fd` below)
+  "file",      # identify file types
+  "tree",      # directory structure at a glance
+  "less",      # pager — git/paging expect it; slim bases drop it
+  "procps",    # ps/top/kill — inspect running processes
+  "unzip",     # extract archives
+  "vim",       # in-box editing for `byre shell` sessions
+]
+# Debian's fd-find installs the binary as `fdfind` (a name clash with another
+# package). Symlink it to the expected `fd`. Skill build blocks run as root,
+# before the `USER dev` switch, so /usr/local/bin is writable; and the skill's
+# own apt (above) installs fdfind before this line runs.
+dockerfile = ["RUN ln -sf /usr/bin/fdfind /usr/local/bin/fd"]
