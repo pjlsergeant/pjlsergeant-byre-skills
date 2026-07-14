@@ -46,9 +46,11 @@ repackaged as byre payloads: a firstrun hook syncs each skill into the Claude
 state volume at launch. Upstream's `code-review` is renamed
 `pocock-code-review` (name clash with a harness built-in). See
 `skills/claude-skills-pocock/LICENSE` for upstream's license and copyright.
+Since 1.0.1 the collection also carries `grilling`, pjlsergeant's own variant
+of upstream's grill-me (not part of the upstream collection).
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.0/skills/claude-skills-pocock/skill.toml --digest sha256:40771e3556f6b1d970cdae086665963c8f23538db48ad796bedc2e5111fa6ef2
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.1/skills/claude-skills-pocock/skill.toml --digest sha256:640fc098b8c1cdb03861884db804b20dc453e71903631135f4c1b4bf914a8422
 ```
 
 ## Publishing a new version

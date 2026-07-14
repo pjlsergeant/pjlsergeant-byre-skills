@@ -1,10 +1,10 @@
 [package]
 id = "pjlsergeant/claude-skills-pocock"
-version = "1.0.0"
+version = "1.0.1"
 kind = "skill"
 package_api = 1
 requires_byre = ">=0.1.10"
-description = "Matt Pocock's Claude Code skill collection (github.com/mattpocock/skills, MIT), repackaged for byre boxes."
+description = "Matt Pocock's Claude Code skill collection (github.com/mattpocock/skills, MIT), repackaged for byre boxes, plus pjlsergeant's grilling variant."
 
 [build.files]
 "." = "/etc/byre/claude-skills-pocock"
@@ -80,6 +80,11 @@ sha256 = "6189dfceb7304a6e5558f75d87e68fa3bc7fcf7ba120e44f21f8a61fe01eba54"
 src = "grill-with-docs/SKILL.md"
 dest = "grill-with-docs/SKILL.md"
 sha256 = "610d091047bcfb9db0f75c057d15538481a721111579fc5ec7f83ad9131a2165"
+
+[[package.files]]
+src = "grilling/SKILL.md"
+dest = "grilling/SKILL.md"
+sha256 = "4fc8087fb48b0174b4f02e03a5ab7e331830f921fd440c51393895902d22e445"
 
 [[package.files]]
 src = "handoff/SKILL.md"
