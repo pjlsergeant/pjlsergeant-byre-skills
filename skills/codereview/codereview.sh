@@ -250,15 +250,23 @@ run_fresh_codex() {
   # leave a stale session that a later --continue would wrongly resume.
   rm -f "$SESSION_FILE"
   echo "Running code review (codex)${RUN_NOTE} — this may take several minutes..."
-  # --sandbox read-only: OS-level enforcement on top of the prompt — codex can
-  # read the repo and exec read-only probes, but writes are blocked, so a
-  # prompt-injection in the code under review can't act. A probe that needs to
-  # write fails inside the sandbox; the prompt tells the reviewer to downgrade
-  # the claim's confidence instead.
+  # --sandbox danger-full-access: the BOX is the wall, not codex's own sandbox.
+  # Codex sandboxes Linux commands with bundled bwrap, which must create a user
+  # namespace — and container runtimes routinely deny that (docker-default
+  # seccomp blocks unprivileged namespace clones; Ubuntu 23.10+ AppArmor piles
+  # on). Under --sandbox read-only every probe then dies BEFORE execution and
+  # the review returns "no findings" with zero coverage — which reads as a
+  # clean bill, worse than no review (verified in-box 2026-07-19, codex
+  # 0.144.6, Ubuntu 24.04 host). So codex joins grok's posture below — honest
+  # enforcement ordering: the box boundary and the tree tripwire are what
+  # actually hold; read-only is asked of the reviewer by the prompt, not the
+  # OS. Cost stated plainly: a prompt-injection in the code under review can
+  # now act through writes — same accepted exposure as grok, and what the
+  # tripwire exists to catch.
   # --skip-git-repo-check: codex refuses non-git dirs by default, but half of
   # what byre boxes isn't a repo, and the BOX is the trust boundary here — the
   # check duplicates an enclosure byre already provides (footgun doctrine).
-  if codex exec --skip-git-repo-check --json --sandbox read-only "$PROMPT" \
+  if codex exec --skip-git-repo-check --json --sandbox danger-full-access "$PROMPT" \
        --output-last-message "$OUT" < /dev/null > "$DBG" 2>&1; then
     sid=$(extract_codex_session)
     [ -n "$sid" ] && [ "$sid" != "null" ] && echo "$sid" > "$SESSION_FILE" || rm -f "$SESSION_FILE"
@@ -292,9 +300,10 @@ run_resume_codex() {
   echo "Continuing previous review session (codex) — this may take several minutes..."
   # The resume subcommand rejects --sandbox ("unexpected argument", clap exit 2
   # — every resume then fell back to a fresh review, silently), but it takes -c
-  # overrides, and sandbox_mode is the same knob by its config name. It DOES
+  # overrides, and sandbox_mode is the same knob by its config name (value
+  # matches the fresh path's --sandbox; see the rationale there). It DOES
   # accept --output-last-message, so the fresh path's extraction works here too.
-  if codex exec resume --skip-git-repo-check --json -c sandbox_mode="read-only" \
+  if codex exec resume --skip-git-repo-check --json -c sandbox_mode="danger-full-access" \
        "$sid" "$PROMPT" --output-last-message "$OUT" < /dev/null > "$DBG" 2>&1; then
     new=$(extract_codex_session); [ -n "$new" ] && [ "$new" != "null" ] && echo "$new" > "$SESSION_FILE"
     if [ -s "$OUT" ]; then cat "$OUT"; record_review; else echo "(could not extract final message; raw: $DBG)"; fi
@@ -310,8 +319,9 @@ run_resume_codex() {
 # - NO --sandbox: grok's Landlock profiles break tool execution inside a byre
 #   box — every tool-using turn returns exit 0 with EMPTY output (verified
 #   in-box 2026-07-09, grok 0.2.93 on a linuxkit kernel; nothing in the debug
-#   log). If a future grok fixes sandboxing in containers, --sandbox read-only
-#   here would restore codex-parity (write-block + child-network-block).
+#   log). Codex hit the same wall a different way (bwrap vs userns denial,
+#   2026-07-19) and now also runs unsandboxed — see run_fresh_codex. Both
+#   reviewers: box boundary + tripwire enforce; the prompt asks read-only.
 # - --disallowed-tools strips the file-edit + todo tools (write_file and
 #   apply_patch are speculative IDs — unknown names are accepted harmlessly,
 #   verified). bash stays: the review needs git reads and cheap probes, so
