@@ -65,20 +65,15 @@ via Traffic Policy on request -- instead of just running `ngrok http <port>`
 and stopping there. See `skills/ngrok/claude-skills/expose-localhost/LICENSE`
 for upstream's license and copyright.
 
-**Not yet packed/tagged.** `skill.toml`'s `[[package.files]]` hashes are
-real (plain `sha256sum`, hand-verified against this repo's own already-packed
-`devlog` entry to confirm the hashing matches what `byre skill pack` would
-produce), but no `byre`/Go toolchain was available to compute the real
-*package* digest (a distinct hash over the whole manifest, not just its
-files -- see `internal/packages/payload.go`'s `PackageDigest` in the byre
-repo) or cut a tag. Before the install command below is trustworthy:
+**Packed, not yet tagged.** `skill.toml` is real `byre skill pack` output
+(re-packing reproduces it byte for byte); the package digest is
+`sha256:042c582921074a8325f1903481dfb2118343dd6aeea4ff57bd45a29329850764`.
+Once a tag containing this commit exists (v1.0.3 is the next free one), the
+install command is:
 
-```sh
-byre skill pack pjlsergeant/ngrok > skills/ngrok/skill.toml   # prints the real digest
-git commit && git tag v1.0.0 && git push --tags
 ```
-
-then add the tag-pinned command here, matching the other entries.
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.3/skills/ngrok/skill.toml --digest sha256:042c582921074a8325f1903481dfb2118343dd6aeea4ff57bd45a29329850764
+```
 
 ## Publishing a new version
 
