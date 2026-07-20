@@ -53,6 +53,33 @@ of upstream's grill-me (not part of the upstream collection).
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.1/skills/claude-skills-pocock/skill.toml --digest sha256:640fc098b8c1cdb03861884db804b20dc453e71903631135f4c1b4bf914a8422
 ```
 
+### pjlsergeant/ngrok
+
+The `ngrok` CLI (installed from ngrok's own apt repo, since it's not in
+Debian's default repos), authenticated at launch from `NGROK_AUTHTOKEN`, plus
+ngrok's own `expose-localhost` Claude Skill
+([github.com/ngrok/agent-skills](https://github.com/ngrok/agent-skills),
+MIT) so the agent tunnels a local port well -- asking about a domain and
+access control before starting anything, wiring up OAuth/rate-limiting/OWASP
+via Traffic Policy on request -- instead of just running `ngrok http <port>`
+and stopping there. See `skills/ngrok/claude-skills/expose-localhost/LICENSE`
+for upstream's license and copyright.
+
+**Not yet packed/tagged.** `skill.toml`'s `[[package.files]]` hashes are
+real (plain `sha256sum`, hand-verified against this repo's own already-packed
+`devlog` entry to confirm the hashing matches what `byre skill pack` would
+produce), but no `byre`/Go toolchain was available to compute the real
+*package* digest (a distinct hash over the whole manifest, not just its
+files -- see `internal/packages/payload.go`'s `PackageDigest` in the byre
+repo) or cut a tag. Before the install command below is trustworthy:
+
+```sh
+byre skill pack pjlsergeant/ngrok > skills/ngrok/skill.toml   # prints the real digest
+git commit && git tag v1.0.0 && git push --tags
+```
+
+then add the tag-pinned command here, matching the other entries.
+
 ## Publishing a new version
 
 1. Edit the package's payload files; bump `version` in its `[package]` block.
