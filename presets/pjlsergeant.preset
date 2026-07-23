@@ -1,0 +1,31 @@
+# pjlsergeant's byre setup -- Claude drives, codex + gemini ride along, plus
+# every skill in this repo. Apply it in your project:
+#
+#   byre preset apply https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/main/presets/pjlsergeant.preset
+#
+# (or save it as `byre.preset` in the project root and run `byre preset apply`).
+# apply shows the full grant review and chauffeurs the digest-pinned installs
+# below before writing anything -- declining any is fine.
+#
+# No base pinned: byre falls back to your default (or debian:bookworm). Add
+# e.g. base = "golang:1.26-bookworm" / "node:22-bookworm" to suit the repo.
+
+agent  = "claude"
+skills = [
+  "codex",                            # OpenAI Codex CLI (the independent reviewer for byre-codereview)
+  "gemini",                           # Gemini CLI (experimental in byre: auth flow not yet live-verified)
+  "pjlsergeant/toolbox",              # ripgrep, fd, tree, vim, and friends in every box
+  "pjlsergeant/devlog",               # dev-workflow conventions: diary, scratch volume
+  "pjlsergeant/codereview",           # byre-codereview -- the second-opinion review loop
+  "pjlsergeant/claude-skills-pocock", # Matt Pocock's Claude skill collection (+ grilling)
+  "pjlsergeant/ngrok",                # ngrok CLI + expose-localhost skill; needs NGROK_AUTHTOKEN
+]                                     #   (drop this line if you don't use ngrok)
+
+# Acquisition pins: tag-pinned URLs + package digests. `byre preset apply`
+# uses these to chauffeur the installs; nothing is ever auto-fetched.
+[sources]
+"pjlsergeant/toolbox"              = { uri = "https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.0/skills/toolbox/skill.toml", digest = "sha256:1b8627bca90e64e0a06c6dd80c2db9089f1bf5790541f76e409ad7f7b6c13cd2" }
+"pjlsergeant/devlog"               = { uri = "https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.0/skills/devlog/skill.toml", digest = "sha256:9ecb65b18386ceea0dc54b7bb040b42e29a9872ab8fed4f9b1f86d5562926c12" }
+"pjlsergeant/codereview"           = { uri = "https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.2/skills/codereview/skill.toml", digest = "sha256:3d0bf433dfab52ad947e125987d50b44aa47000414bbe14023bbcf80277ade86" }
+"pjlsergeant/claude-skills-pocock" = { uri = "https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.1/skills/claude-skills-pocock/skill.toml", digest = "sha256:640fc098b8c1cdb03861884db804b20dc453e71903631135f4c1b4bf914a8422" }
+"pjlsergeant/ngrok"                = { uri = "https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.3/skills/ngrok/skill.toml", digest = "sha256:042c582921074a8325f1903481dfb2118343dd6aeea4ff57bd45a29329850764" }

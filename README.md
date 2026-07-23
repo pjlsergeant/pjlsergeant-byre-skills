@@ -11,6 +11,27 @@ with. A git tag is a convention, not an integrity guarantee -- the `--digest`
 pin is what makes the command end-to-end verifiable. Installing grants
 nothing: a package only takes effect when a box's config enables it.
 
+## The whole setup as one preset
+
+`presets/pjlsergeant.preset` composes everything here into one box: Claude as
+the agent, codex + gemini riding along, plus all the packages below. In your
+project:
+
+```
+byre preset apply https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/main/presets/pjlsergeant.preset
+```
+
+`apply` shows the composed box's full grant review and walks you through
+installing any packages you don't have -- each install pinned to the tag +
+digest from the preset's `[sources]` table -- before writing anything. The
+preset URL itself rides `main` (so it tracks the newest pins); the packages
+it installs are still digest-verified end to end.
+
+Then `byre develop`, and log each CLI in once per project: Claude via
+`/login` in-session, codex via `codex login --device-auth` (plain
+`codex login` needs a browser the box doesn't have), gemini via its Google
+OAuth flow on first use.
+
 ## Packages
 
 ### pjlsergeant/devlog
@@ -26,7 +47,7 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 byre-codereview -- the independent second-opinion review loop.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.0/skills/codereview/skill.toml --digest sha256:366093764005feacafa40560a47c2847ba130678de86fdbc02e7a465c553bb3f
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.2/skills/codereview/skill.toml --digest sha256:3d0bf433dfab52ad947e125987d50b44aa47000414bbe14023bbcf80277ade86
 ```
 
 ### pjlsergeant/toolbox
@@ -64,12 +85,6 @@ access control before starting anything, wiring up OAuth/rate-limiting/OWASP
 via Traffic Policy on request -- instead of just running `ngrok http <port>`
 and stopping there. See `skills/ngrok/claude-skills/expose-localhost/LICENSE`
 for upstream's license and copyright.
-
-**Packed, not yet tagged.** `skill.toml` is real `byre skill pack` output
-(re-packing reproduces it byte for byte); the package digest is
-`sha256:042c582921074a8325f1903481dfb2118343dd6aeea4ff57bd45a29329850764`.
-Once a tag containing this commit exists (v1.0.3 is the next free one), the
-install command is:
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.3/skills/ngrok/skill.toml --digest sha256:042c582921074a8325f1903481dfb2118343dd6aeea4ff57bd45a29329850764
