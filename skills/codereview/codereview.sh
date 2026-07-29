@@ -143,8 +143,13 @@ or credential-writing subcommand, not even to check whether something works.
 that is shared with the rest of the box and is NOT covered by the tree
 tripwire, so nothing will catch it and nothing will roll it back. A reviewer
 doing this has already logged a box out in the middle of a review loop, taking
-the author's tooling down with it. To check what an auth flag does, read
-`--help` output or the docs — never invoke the flow.
+the author's tooling down with it.
+
+To be explicit about the line: `codex login --help` and `grok login --help` are
+FINE and are the intended way to check what an auth flag does — `--help` prints
+and exits without touching credentials. What is banned is invoking the flow
+itself, including seemingly-harmless probes like `login --with-api-key` or
+`login status`.
 
 Do NOT run builds or the project's test suite — the author owns keeping those
 green, and re-running them here adds minutes and no evidence. You MAY run
@@ -372,6 +377,17 @@ GROK_TOOL_STRIP="search_replace,todo_write,write_file,apply_patch"
 # this very file would), and grepping the whole body would discard it.
 grok_startup_error() { head -n1 "$OUT" 2>/dev/null | grep -q "^Couldn.t create session"; }
 
+# Auth diagnostics as the CLI itself emits them: at the TOP of a stream, alone,
+# instead of a review. Anchoring to the first lines is what separates a real
+# diagnostic from a review that merely QUOTES one — a review of this very file
+# would contain every string below — and it is the same reasoning as
+# grok_startup_error and the "Probes run" check. Used two ways: to stop an
+# exit-0 auth death being recorded as a clean review, and to let
+# report_failure_grok consult $OUT without treating arbitrary review prose as
+# an auth failure.
+GROK_AUTH_RE='token_expired|refresh token|not logged in|not signed in|sign in|401|invalid api key'
+grok_auth_error() { head -n 3 "${1:-$OUT}" 2>/dev/null | grep -qiE "$GROK_AUTH_RE"; }
+
 run_fresh_grok() {
   rm -f "$SESSION_FILE"
   echo "Running code review (grok)${RUN_NOTE} — this may take several minutes..."
@@ -380,8 +396,13 @@ run_fresh_grok() {
   local sid; sid=$(cat /proc/sys/kernel/random/uuid)
   if GROK_SUBAGENTS=0 grok -p "$PROMPT" -s "$sid" --always-approve --disallowed-tools "$GROK_TOOL_STRIP" \
        < /dev/null > "$OUT" 2> "$DBG"; then
-    if [ ! -s "$OUT" ] || grok_startup_error; then
-      echo "byre-codereview: grok failed before reviewing (exit 0 with empty output, or a startup error):" >&2
+    # grok_auth_error is in this gate because an unauthenticated grok can exit 0
+    # with a NON-empty $OUT that is just the auth message and none of the
+    # startup-error shape — which the two other conditions both miss, so it
+    # would have been recorded as a clean review. That is the worst outcome
+    # this script has: an absence of findings that was never a review.
+    if [ ! -s "$OUT" ] || grok_startup_error || grok_auth_error "$OUT"; then
+      echo "byre-codereview: grok failed before reviewing (exit 0 with empty output, or a startup/auth error):" >&2
       cat "$OUT" >&2
       # An auth failure can present HERE too (exit 0, startup death), not only
       # on the non-zero path — so run the same detector rather than printing a
@@ -405,7 +426,7 @@ run_resume_grok() {
   local sid="$1"
   echo "Continuing previous review session (grok) — this may take several minutes..."
   if GROK_SUBAGENTS=0 grok -p "$PROMPT" --resume "$sid" --always-approve --disallowed-tools "$GROK_TOOL_STRIP" \
-       < /dev/null > "$OUT" 2> "$DBG" && [ -s "$OUT" ] && ! grok_startup_error; then
+       < /dev/null > "$OUT" 2> "$DBG" && [ -s "$OUT" ] && ! grok_startup_error && ! grok_auth_error "$OUT"; then
     cat "$OUT"; record_review; cleanup
   else
     # Same partial-output courtesy as the fresh path before the fallback eats it.
@@ -506,11 +527,14 @@ report_failure_claude() {
 # case this function exists to catch (observed in-box 2026-07-29). Anchored to
 # "not signed in", not a bare "signed in", which would also match a success
 # line like "Successfully signed in".
-# Both streams, like report_failure_claude: the observed failure put the text
-# on stderr, but grok splits stdout/stderr (:365) and auth text landing on
-# stdout would otherwise re-open the very gap this closes.
+# Both streams, but NOT the same way. $DBG is pure CLI diagnostics, so a
+# whole-file match is right there. $OUT is the reviewer's own partial REPORT —
+# matching it whole would mean a review that merely mentions "401" or "sign in"
+# (any review of this file does) followed by an unrelated non-zero exit sends
+# the reader off to re-authenticate instead of showing the real failure. So
+# $OUT is consulted only through the head-anchored grok_auth_error.
 report_failure_grok() {
-  if grep -qiE 'token_expired|refresh token|not logged in|not signed in|sign in|401|invalid api key' "$OUT" "$DBG" 2>/dev/null; then
+  if grep -qiE "$GROK_AUTH_RE" "$DBG" 2>/dev/null || grok_auth_error "$OUT"; then
     echo "byre-codereview: grok may need re-authentication (its ~6h tokens refresh silently until the chain dies)." >&2
     echo "  Run 'byre shell', then: grok-login (or: grok login --device-auth)" >&2
     echo "  Debug log: $DBG" >&2
