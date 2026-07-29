@@ -255,6 +255,19 @@ record_review() {
       echo "  so the run may have died mid-review. Treat the findings — and especially the"
       echo "  APPARENT ABSENCE of findings — accordingly."
     } >&2
+  # Raw runs have no marker to miss, which left them the ONE mode where a
+  # recorded non-review carried no warning at all — the gate lets an
+  # auth-on-stdout death through by design, and the net above never fired to
+  # say so. This is the net for that mode: it WARNS, never discards, so the
+  # loose read of a caller's arbitrary output cannot cost them a real answer.
+  elif [ "$RAW" = true ] && head -n 5 "$OUT" 2>/dev/null | grep -qiE "$GROK_AUTH_PHRASE_RE"; then
+    note=" — POSSIBLY NOT A REVIEW: opens with something shaped like an auth diagnostic"
+    {
+      echo ""
+      echo "byre-codereview: WARNING — this raw run's output opens like an authentication"
+      echo "  diagnostic rather than an answer. Recorded anyway (raw output is yours to"
+      echo "  judge), but check the reviewer is still logged in before trusting it."
+    } >&2
   fi
   raw_tag=""
   [ "$RAW" = true ] && raw_tag=", raw"
@@ -377,30 +390,26 @@ GROK_TOOL_STRIP="search_replace,todo_write,write_file,apply_patch"
 # this very file would), and grepping the whole body would discard it.
 grok_startup_error() { head -n1 "$OUT" 2>/dev/null | grep -q "^Couldn.t create session"; }
 
-# Auth detection does TWO jobs with different stakes, so it gets two patterns.
-# Conflating them is what made 1.1.2 wrong.
+# GATE pattern — the only thing that may DISCARD a run. Two properties, both
+# chosen because discarding is destructive and missing is not:
 #
-# The GATE decides whether to THROW A REVIEW AWAY, so it is strict: real
-# phrases, matched at LINE START, and deliberately NO bare "401" or bare
-# "sign in". A review's opening finding can legitimately read
-# "codereview.sh:401 — bad fallback", or quote "sign in", or say "HTTP 401 from
-# the API"; 1.1.2 matched those as substrings and discarded the review while
-# telling the author to re-authenticate. Both reviewers reproduced it.
+#   - it must START a line, distinguishing a diagnostic from prose about one;
+#   - and it must END the line or run into punctuation.
 #
-# The HINT only chooses which advice to print on a run that has ALREADY failed,
-# where a loose match costs a slightly wrong suggestion and never a lost
-# review. It keeps the broad pattern, and only against $DBG.
-# Phrases as a CLI actually emits them: STARTING a line, and ending it or
-# running into sentence punctuation. Bare "unauthorized" is gone — it matched
-# "Unauthorized access via IDOR", an ordinary security finding — and so is any
-# phrase that can continue into prose: "Invalid API key handling is wrong" no
-# longer matches, because "invalid api key" there runs on into more words.
-# Auth diagnostics as grok's CLI emits them, matched at line start. The list
-# can afford to be generous — including wordings never observed here — because
-# it only ever runs against $DBG, where there is no review prose to trip over.
-# The STRONG/WEAK distinction 1.1.5 needed is gone with the $OUT test that
-# required it.
-GROK_AUTH_PHRASE_RE='^[[:space:]]*(error:[[:space:]]*)?(you are[[:space:]]+)?(not signed in|not logged in|login required|authentication required|please (log|sign) in|please authenticate|access token expired|token_expired|invalid api key|api key is invalid|(http[[:space:]]+)?401[[:space:]]+unauthorized|unauthorized)'
+# 1.1.6 dropped that second property, reasoning that stderr carries no review
+# prose so generosity was free. It is not free: stderr also carries tool and
+# child-process output, and unanchored the list matches "Authentication
+# required for private registries is not enforced." and "Unauthorized access
+# via IDOR" — the exact strings four earlier versions worked to stop matching,
+# handed a fresh route to destroy a review from the other channel.
+#
+# The bias is deliberate and asymmetric: a MISSED diagnostic is recorded and
+# loudly flagged by record_review as possibly truncated, while a FALSE match
+# destroys a real review outright. So "Please sign in to continue" is knowingly
+# not matched — a soft miss beats a hard loss.
+GROK_AUTH_PHRASE_RE='^[[:space:]]*(error:[[:space:]]*)?(you are[[:space:]]+)?(not signed in|not logged in|login required|authentication required|please log ?in|please sign in|please authenticate|access token expired|token_expired|invalid api key|api key is invalid|(http[[:space:]]+)?401[[:space:]]+unauthorized|unauthorized)([[:punct:]]|[[:space:]]*$)'
+# HINT pattern — only ever picks which ADVICE an already-failed run prints, so
+# it stays loose: a wrong hint costs a glance, never a review.
 GROK_AUTH_HINT_RE='token_expired|refresh token|not logged in|not signed in|sign in|401|invalid api key'
 
 # Only the CLI's OWN channel can condemn a run.
@@ -436,19 +445,16 @@ run_fresh_grok() {
   local sid; sid=$(cat /proc/sys/kernel/random/uuid)
   if GROK_SUBAGENTS=0 grok -p "$PROMPT" -s "$sid" --always-approve --disallowed-tools "$GROK_TOOL_STRIP" \
        < /dev/null > "$OUT" 2> "$DBG"; then
-    # The auth gate is here because an unauthenticated grok can exit 0 with a
-    # NON-empty $OUT that is just the auth message and none of the startup-error
-    # shape — which the other conditions miss, so it was recorded as a clean
-    # review. That is the worst outcome this script has: an absence of findings
-    # that was never a review. BOTH streams are checked: the mirror case is auth
-    # text on stderr while stdout holds a non-empty preamble, which a
-    # $OUT-only gate lets through just as silently.
+    # grok can exit 0 having never reviewed: empty output, a startup death, or
+    # an auth failure. Each condition here reads a CLI-owned signal only —
+    # $OUT's emptiness and its FIRST line, and $DBG. Nothing inspects the
+    # body of the report, which is what five earlier versions kept doing and
+    # kept destroying real reviews over.
     if [ ! -s "$OUT" ] || grok_startup_error || grok_auth_death; then
       echo "byre-codereview: grok failed before reviewing (exit 0 with empty output, or a startup/auth error):" >&2
       cat "$OUT" >&2
-      # An auth failure can present HERE too (exit 0, startup death), not only
-      # on the non-zero path — so run the same detector rather than printing a
-      # bare log path and leaving the reader to guess. It prints the debug log
+      # Run the same detector as the non-zero path rather than printing a bare
+      # log path and leaving the reader to guess. It prints the debug log
       # either way, so this replaces that line rather than adding to it.
       report_failure_grok
       rm -f "$OUT" "$SESSION_FILE"; exit 1
@@ -561,25 +567,20 @@ report_failure_claude() {
   fi
 }
 
-# Tight auth patterns only — bare "expired"/"authentication" match too many
-# ordinary error lines and would send people into a pointless re-login loop.
-# But tight is not the same as narrow: "not signed in" is here because grok's
-# actual unauthenticated error is "Not signed in", which "not logged in" and
-# "sign in" both MISS (sign in != signed in) — so the single most common grok
-# auth failure fell through to the generic "review failed" message, the exact
-# case this function exists to catch (observed in-box 2026-07-29). Anchored to
-# "not signed in", not a bare "signed in", which would also match a success
-# line like "Successfully signed in".
-# Both streams, but NOT the same way. This function only picks which ADVICE to
-# print on a run that already failed, so $DBG can use the loose hint pattern —
-# a wrong hint costs a wasted glance, never a lost review. $OUT is still the
-# reviewer's own partial REPORT, so it is consulted only through
-# $DBG alone, like the gate: this only picks which ADVICE a failed run prints,
-# so the loose pattern is fine here — a wrong hint costs a glance. $OUT is not
-# consulted at all, because a review mentioning "401" must never send its
-# author off to re-authenticate.
+# Chooses which ADVICE a run that has ALREADY failed prints. Nothing here can
+# discard anything, which is exactly why it may read what the gate must not:
+# a wrong guess costs a wasted glance.
+#
+# So $DBG gets the loose hint pattern, and $OUT is consulted too — head-anchored
+# via the gate pattern, since an auth death announces itself at the top. That
+# matters for the common shape the gate deliberately no longer catches: auth
+# text on stdout with a non-zero exit. Without this the reader gets a bare
+# "review failed" and a log path, which is how the original "Not signed in"
+# miss went unnoticed (observed in-box 2026-07-29): the old pattern looked for
+# "not logged in" and "sign in", and "sign in" != "signed in".
 report_failure_grok() {
-  if grep -qiE "$GROK_AUTH_HINT_RE" "$DBG" 2>/dev/null; then
+  if grep -qiE "$GROK_AUTH_HINT_RE" "$DBG" 2>/dev/null \
+     || head -n 5 "$OUT" 2>/dev/null | grep -qiE "$GROK_AUTH_PHRASE_RE"; then
     echo "byre-codereview: grok may need re-authentication (its ~6h tokens refresh silently until the chain dies)." >&2
     echo "  Run 'byre shell', then: grok-login (or: grok login --device-auth)" >&2
     echo "  Debug log: $DBG" >&2
