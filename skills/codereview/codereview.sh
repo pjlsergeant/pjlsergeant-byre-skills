@@ -395,47 +395,38 @@ grok_startup_error() { head -n1 "$OUT" 2>/dev/null | grep -q "^Couldn.t create s
 # "Unauthorized access via IDOR", an ordinary security finding — and so is any
 # phrase that can continue into prose: "Invalid API key handling is wrong" no
 # longer matches, because "invalid api key" there runs on into more words.
-# Two classes, because "must end the line" is right for some phrases and wrong
-# for others. STRONG phrases do not read as review prose, so they match at line
-# start and may run on — which recovers "Please sign in to continue", a real
-# diagnostic shape that 1.1.4's blanket end-anchor dropped. WEAK phrases DO
-# appear in ordinary findings ("Invalid API key handling is wrong", "401
-# Unauthorized responses are not handled", "Unauthorized access via IDOR"), so
-# those must end the line or run into punctuation — which still admits
-# "Error: Unauthorized" as the diagnostic it is.
-GROK_AUTH_STRONG='not signed in|not logged in|authentication required|please (log|sign) in|token_expired'
-GROK_AUTH_WEAK='invalid api key|(http[[:space:]]+)?401[[:space:]]+unauthorized|unauthorized'
-GROK_AUTH_PHRASE_RE="^[[:space:]]*(error:[[:space:]]*)?(you are[[:space:]]+)?(($GROK_AUTH_STRONG)|($GROK_AUTH_WEAK)([[:punct:]]|[[:space:]]*\$))"
+# Auth diagnostics as grok's CLI emits them, matched at line start. The list
+# can afford to be generous — including wordings never observed here — because
+# it only ever runs against $DBG, where there is no review prose to trip over.
+# The STRONG/WEAK distinction 1.1.5 needed is gone with the $OUT test that
+# required it.
+GROK_AUTH_PHRASE_RE='^[[:space:]]*(error:[[:space:]]*)?(you are[[:space:]]+)?(not signed in|not logged in|login required|authentication required|please (log|sign) in|please authenticate|access token expired|token_expired|invalid api key|api key is invalid|(http[[:space:]]+)?401[[:space:]]+unauthorized|unauthorized)'
 GROK_AUTH_HINT_RE='token_expired|refresh token|not logged in|not signed in|sign in|401|invalid api key'
 
-# A review is identified POSITIVELY, by the trailing section the prompt
-# REQUIRES it to end with. That is the only signal here we control rather than
-# guess at, and reaching for it is what the three previous attempts were
-# missing: "does this look like an auth diagnostic?" is an open-ended question
-# about someone else's CLI, and each version answered it wrong in a different
-# direction — too loose (1.1.2 killed reviews mentioning 401), too narrow
-# (1.1.3 killed a review quoting the phrase), then length-based (1.1.4, which
-# failed OPEN: auth text plus 20 lines of help sailed through as a clean
-# review, the exact outcome the gate exists to prevent).
+# Only the CLI's OWN channel can condemn a run.
 #
-# Tail-anchored for the same reason record_review's copy is: a review that
-# QUOTES the mandate mid-body must not count as having produced it.
-grok_is_review() { tail -n 40 "$1" 2>/dev/null | grep -qi 'probes run'; }
-grok_auth_phrase() { grep -qiE "$GROK_AUTH_PHRASE_RE" "$1" 2>/dev/null; }
-
-# The gate: output carrying the mandated marker IS a review — never discarded,
-# at any length, whatever it quotes. Only output that never produced the marker
-# is tested for auth phrases, and then across BOTH streams with no length cap,
-# so neither a chatty auth death nor a quiet stderr can hide one.
+# $DBG is grok's stderr — diagnostics. $OUT is whatever the model wrote. Four
+# versions tried to read authentication failure out of $OUT and every one
+# destroyed legitimate reviews: by vocabulary (1.1.2 killed reviews mentioning
+# "401"), by anchoring (1.1.3 killed one quoting "not signed in"), by length
+# (1.1.4, which also failed OPEN), and by a marker the model itself produces
+# (1.1.5) — which can be omitted, scrolled out of a fixed tail window by a long
+# probe list, or matched as a substring of "probes runtime". A string an LLM
+# wrote is not evidence about whether the CLI authenticated.
 #
-# --raw mandates no marker (the prompt is the caller's), so a raw run cannot
-# use the positive signal and is judged on phrases alone. A raw review that
-# opens a line with a diagnostic phrase is therefore still discardable; that is
-# the documented cost of replacing the prompt that carries the contract.
-grok_auth_death() {
-  if [ "$RAW" != true ] && grok_is_review "$OUT"; then return 1; fi
-  grok_auth_phrase "$OUT" || grok_auth_phrase "$DBG"
-}
+# So $OUT is no longer classified at all. A review cannot be discarded for what
+# it QUOTES — in --raw either — and there is no marker contract to game. This
+# also settles the policy clash both reviewers named: record_review treats a
+# missing "Probes run:" as warn-and-still-record, and the gate no longer
+# contradicts it by treating the same omission as grounds for deletion.
+#
+# The residual is accepted rather than defended against: an auth death that
+# writes only to stdout while stderr stays silent gets recorded. It arrives
+# without the mandated section, so record_review already flags it loudly as
+# possibly truncated — the long-standing policy for output that may not be a
+# review. Warning about a maybe-review beats destroying a real one, and four
+# attempts at the cleverer thing all destroyed real ones.
+grok_auth_death() { grep -qiE "$GROK_AUTH_PHRASE_RE" "$DBG" 2>/dev/null; }
 
 run_fresh_grok() {
   rm -f "$SESSION_FILE"
@@ -583,10 +574,12 @@ report_failure_claude() {
 # print on a run that already failed, so $DBG can use the loose hint pattern —
 # a wrong hint costs a wasted glance, never a lost review. $OUT is still the
 # reviewer's own partial REPORT, so it is consulted only through
-# grok_auth_phrase, the line-anchored form. Matching $OUT loosely here would
-# send the reader to re-authenticate because their review mentioned "401".
+# $DBG alone, like the gate: this only picks which ADVICE a failed run prints,
+# so the loose pattern is fine here — a wrong hint costs a glance. $OUT is not
+# consulted at all, because a review mentioning "401" must never send its
+# author off to re-authenticate.
 report_failure_grok() {
-  if grep -qiE "$GROK_AUTH_HINT_RE" "$DBG" 2>/dev/null || grok_auth_phrase "$OUT"; then
+  if grep -qiE "$GROK_AUTH_HINT_RE" "$DBG" 2>/dev/null; then
     echo "byre-codereview: grok may need re-authentication (its ~6h tokens refresh silently until the chain dies)." >&2
     echo "  Run 'byre shell', then: grok-login (or: grok login --device-auth)" >&2
     echo "  Debug log: $DBG" >&2
