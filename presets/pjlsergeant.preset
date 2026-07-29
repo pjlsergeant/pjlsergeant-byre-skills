@@ -17,6 +17,9 @@ skills = [
   "pjlsergeant/toolbox",              # ripgrep, fd, tree, vim, and friends in every box
   "pjlsergeant/devlog",               # dev-workflow conventions: diary, scratch volume
   "pjlsergeant/codereview",           # byre-codereview -- the second-opinion review loop
+  "pjlsergeant/codex-security",       # OpenAI's security scanner, on the codex credential
+                                      #   (costs real money per scan; needs byre >= 1.2.0,
+                                      #    which this whole preset now inherits)
   "pjlsergeant/claude-skills-pocock", # Matt Pocock's Claude skill collection (+ grilling)
   "pjlsergeant/ngrok",                # ngrok CLI + expose-localhost skill; needs NGROK_AUTHTOKEN
 ]                                     #   (drop this line if you don't use ngrok)
@@ -27,5 +30,6 @@ skills = [
 "pjlsergeant/toolbox"              = { uri = "https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.0/skills/toolbox/skill.toml", digest = "sha256:1b8627bca90e64e0a06c6dd80c2db9089f1bf5790541f76e409ad7f7b6c13cd2" }
 "pjlsergeant/devlog"               = { uri = "https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.0/skills/devlog/skill.toml", digest = "sha256:9ecb65b18386ceea0dc54b7bb040b42e29a9872ab8fed4f9b1f86d5562926c12" }
 "pjlsergeant/codereview"           = { uri = "https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.2/skills/codereview/skill.toml", digest = "sha256:3d0bf433dfab52ad947e125987d50b44aa47000414bbe14023bbcf80277ade86" }
+"pjlsergeant/codex-security"       = { uri = "https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/TAG-TO-FILL/skills/codex-security/skill.toml", digest = "sha256:DIGEST-TO-FILL" }
 "pjlsergeant/claude-skills-pocock" = { uri = "https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.1/skills/claude-skills-pocock/skill.toml", digest = "sha256:640fc098b8c1cdb03861884db804b20dc453e71903631135f4c1b4bf914a8422" }
 "pjlsergeant/ngrok"                = { uri = "https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.3/skills/ngrok/skill.toml", digest = "sha256:042c582921074a8325f1903481dfb2118343dd6aeea4ff57bd45a29329850764" }
