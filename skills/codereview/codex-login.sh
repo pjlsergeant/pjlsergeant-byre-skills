@@ -17,11 +17,12 @@ if ! command -v codex >/dev/null 2>&1; then
   exit 127
 fi
 
-# Args are appended AFTER --device-auth, so this is a wrapper for the zero-arg
-# recovery flow, not a general front-end for `codex login`. The other login
-# modes do NOT work through it -- `codex-login status` becomes
-# `codex login --device-auth status`, and --with-api-key is a separate mode
-# that would be stacked on top of device auth rather than replacing it. For
-# those, call `codex login` directly. Pass-through is kept only so compatible
-# extras (a -c config override) remain reachable.
+# Args are appended AFTER --device-auth, so this wraps the zero-arg recovery
+# flow rather than fronting all of `codex login`. Subcommands survive the
+# ordering -- `codex-login status` runs status fine (clap takes the flag before
+# the subcommand, verified) -- but an alternate login MODE does not:
+# --with-api-key lands on top of device auth instead of replacing it, so you
+# get the device flow either way. Use `codex login --with-api-key` directly for
+# that. Pass-through is kept so compatible extras (a -c config override) stay
+# reachable.
 exec codex login --device-auth "$@"

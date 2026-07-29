@@ -137,6 +137,15 @@ anything — not the working tree, not git state, not credentials or other share
 state. The working tree is re-checked after your run; a reviewer that mutates
 the tree contaminates the thing under review.
 
+NEVER run an authentication command of any CLI — no `login`, `logout`, `auth`,
+or credential-writing subcommand, not even to check whether something works.
+`codex login --with-api-key`, `grok login`, and friends WRITE credential state
+that is shared with the rest of the box and is NOT covered by the tree
+tripwire, so nothing will catch it and nothing will roll it back. A reviewer
+doing this has already logged a box out in the middle of a review loop, taking
+the author's tooling down with it. To check what an auth flag does, read
+`--help` output or the docs — never invoke the flow.
+
 Do NOT run builds or the project's test suite — the author owns keeping those
 green, and re-running them here adds minutes and no evidence. You MAY run
 cheap, targeted, read-only probes (a --help, a one-liner repro, inspecting a
@@ -172,8 +181,15 @@ OUT=$(mktemp "$REVIEW_DIR/.out.XXXXXX")
 DBG=$(mktemp "$REVIEW_DIR/.dbg.XXXXXX")
 cleanup() { rm -f "$OUT" "$DBG"; }
 
-# Snapshot of the working tree the reviewer must not change: status + tracked-
-# content diff + untracked-file CONTENT hashes (porcelain alone only lists
+# Snapshot of the working tree the reviewer must not change. NOTE the limit of
+# what this can police: it covers the git working tree and nothing else. State
+# outside it — credentials (~/.codex/auth.json, ~/.grok), other volumes, the
+# rest of $HOME — is invisible here, so a reviewer that clobbers a login is
+# caught by nobody (observed 2026-07-29: a reviewer ran `codex login
+# --with-api-key` as a "probe" and logged the box out). The prompt above bans
+# that explicitly because the tripwire structurally cannot.
+# Contents: status + tracked-content diff + untracked-file CONTENT hashes
+# (porcelain alone only lists
 # untracked NAMES, so a content-only edit to an existing untracked file would
 # slip through; ls-files -o is plumbing, so it also sidesteps a
 # status.showUntrackedFiles=no config). Gitignored files (including .byre-devlog/,
@@ -287,7 +303,8 @@ report_failure_codex() {
   if grep -qiE 'token_expired|refresh token|sign in again|authentication token is expired|401 unauthorized' "$DBG" 2>/dev/null; then
     echo "byre-codereview: codex authentication failed — the login expired or was invalidated." >&2
     echo "  Re-authenticate in another terminal: run 'byre shell', then:" >&2
-    echo "      codex-login        # wraps the device-code flow" >&2
+    echo "      codex-login                  # this package's wrapper, or:" >&2
+    echo "      codex login --device-auth    # the same thing, always available" >&2
     echo "  (Plain 'codex login' opens a browser flow the box can't complete.)" >&2
     echo "  Debug log: $DBG" >&2
   else
@@ -495,7 +512,7 @@ report_failure_claude() {
 report_failure_grok() {
   if grep -qiE 'token_expired|refresh token|not logged in|not signed in|sign in|401|invalid api key' "$OUT" "$DBG" 2>/dev/null; then
     echo "byre-codereview: grok may need re-authentication (its ~6h tokens refresh silently until the chain dies)." >&2
-    echo "  Run 'byre shell', then: grok-login" >&2
+    echo "  Run 'byre shell', then: grok-login (or: grok login --device-auth)" >&2
     echo "  Debug log: $DBG" >&2
   else
     echo "byre-codereview: review failed. Debug log: $DBG" >&2
