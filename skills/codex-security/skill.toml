@@ -7,7 +7,7 @@ companion_for = "codex"
 
 [package]
 id = "pjlsergeant/codex-security"
-version = "1.0.0"
+version = "1.0.1"
 kind = "skill"
 package_api = 1
 requires_byre = ">=1.2.0"
@@ -39,5 +39,5 @@ file = "context.md"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "7e2863d537c01abc0222d7a5d46685e6ee40dfdbe1b8ed069dd76ca183c59126"
+sha256 = "32bad6b2b3e1c8c0d8edfcef9ba25c695292d9d1515e3d62f2b5ab1d3600ae9b"
 

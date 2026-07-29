@@ -19,8 +19,14 @@ mid-scan lands in the throwaway copy and orphans the real `auth.json`'s
 refresh chain: the next codex refresh fails with "refresh token already
 used" (byre-codereview dying on 401s is the usual symptom). Low
 probability per run, higher on long scans. Recovery is a fresh
-`codex login --device-auth`; in a shared-auth box the brick hits every
-box sharing the credential, same remedy.
+`codex login --device-auth` (plain `codex login` needs a browser the box
+doesn't have). That form always works wherever codex itself is present,
+which is the only thing this skill can promise: it is a companion to
+`codex` alone. Boxes that ALSO run codereview 1.1.0 or newer get a
+`codex-login` helper wrapping exactly that command -- but packages are
+pinned independently, so check it is on PATH before reaching for it
+rather than assuming. In a shared-auth box the brick hits every box
+sharing the credential, same remedy.
 
 ## Cost: real money per scan -- always cap it
 

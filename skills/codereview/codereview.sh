@@ -286,8 +286,8 @@ run_fresh_codex() {
 report_failure_codex() {
   if grep -qiE 'token_expired|refresh token|sign in again|authentication token is expired|401 unauthorized' "$DBG" 2>/dev/null; then
     echo "byre-codereview: codex authentication failed — the login expired or was invalidated." >&2
-    echo "  Re-authenticate in another terminal: run 'byre shell', then the device-code flow:" >&2
-    echo "      codex login --device-auth" >&2
+    echo "  Re-authenticate in another terminal: run 'byre shell', then:" >&2
+    echo "      codex-login        # wraps the device-code flow" >&2
     echo "  (Plain 'codex login' opens a browser flow the box can't complete.)" >&2
     echo "  Debug log: $DBG" >&2
   else
@@ -366,7 +366,11 @@ run_fresh_grok() {
     if [ ! -s "$OUT" ] || grok_startup_error; then
       echo "byre-codereview: grok failed before reviewing (exit 0 with empty output, or a startup error):" >&2
       cat "$OUT" >&2
-      echo "  Debug log: $DBG" >&2
+      # An auth failure can present HERE too (exit 0, startup death), not only
+      # on the non-zero path — so run the same detector rather than printing a
+      # bare log path and leaving the reader to guess. It prints the debug log
+      # either way, so this replaces that line rather than adding to it.
+      report_failure_grok
       rm -f "$OUT" "$SESSION_FILE"; exit 1
     fi
     echo "$sid" > "$SESSION_FILE"
@@ -478,10 +482,20 @@ report_failure_claude() {
 
 # Tight auth patterns only — bare "expired"/"authentication" match too many
 # ordinary error lines and would send people into a pointless re-login loop.
+# But tight is not the same as narrow: "not signed in" is here because grok's
+# actual unauthenticated error is "Not signed in", which "not logged in" and
+# "sign in" both MISS (sign in != signed in) — so the single most common grok
+# auth failure fell through to the generic "review failed" message, the exact
+# case this function exists to catch (observed in-box 2026-07-29). Anchored to
+# "not signed in", not a bare "signed in", which would also match a success
+# line like "Successfully signed in".
+# Both streams, like report_failure_claude: the observed failure put the text
+# on stderr, but grok splits stdout/stderr (:365) and auth text landing on
+# stdout would otherwise re-open the very gap this closes.
 report_failure_grok() {
-  if grep -qiE 'token_expired|refresh token|not logged in|sign in|401|invalid api key' "$DBG" 2>/dev/null; then
+  if grep -qiE 'token_expired|refresh token|not logged in|not signed in|sign in|401|invalid api key' "$OUT" "$DBG" 2>/dev/null; then
     echo "byre-codereview: grok may need re-authentication (its ~6h tokens refresh silently until the chain dies)." >&2
-    echo "  Run 'byre shell', then: grok login --device-auth" >&2
+    echo "  Run 'byre shell', then: grok-login" >&2
     echo "  Debug log: $DBG" >&2
   else
     echo "byre-codereview: review failed. Debug log: $DBG" >&2
