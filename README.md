@@ -83,6 +83,9 @@ codex login just works and this package needs no login flow, volume, or egress
 of its own. Note it **costs real money per scan** -- see the skill's own
 guidance on capping it -- and it needs byre >= 1.2.0.
 
+Not yet in the preset above: it is pinned at release time, and it would raise
+the whole preset's byre floor to 1.2.0.
+
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/TAG-TO-FILL/skills/codex-security/skill.toml --digest sha256:DIGEST-TO-FILL
 ```
