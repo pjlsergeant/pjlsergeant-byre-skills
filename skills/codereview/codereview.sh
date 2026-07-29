@@ -306,9 +306,12 @@ run_fresh_codex() {
     # would otherwise print nothing, record nothing, and exit 0 — a silent
     # non-review indistinguishable from success. codex has not been seen doing
     # this; the check costs a line and removes an asymmetry with no reason.
-    if [ ! -s "$OUT" ]; then
+    # --raw sends the caller's prompt verbatim, and a caller may legitimately
+    # want no final text, so the guard applies only to built-in reviews, which
+    # must return a report.
+    if [ "$RAW" != true ] && [ ! -s "$OUT" ]; then
       echo "byre-codereview: codex exited 0 but produced no final message." >&2
-      echo "  Debug log: $DBG" >&2
+      report_failure_codex
       rm -f "$OUT" "$SESSION_FILE"; exit 1
     fi
     sid=$(extract_codex_session)
@@ -386,20 +389,35 @@ run_resume_codex() {
 #   by the "Probes run:" check in record_review.
 GROK_TOOL_STRIP="search_replace,todo_write,write_file,apply_patch"
 
-# An auth diagnostic as a CLI emits one: starting a line, and ending it or
-# running into punctuation. Both anchors matter — unanchored this matches
-# ordinary findings ("Unauthorized access via IDOR"), and a review of this file
-# quotes every string in the list. Not grok-specific: claude and codex announce
-# auth the same way, and the raw net below uses it for all three.
+# DISCARD pattern. An auth diagnostic as a CLI emits one: starting a line, and
+# ending it or running into punctuation. Both anchors matter — unanchored this
+# matches ordinary findings ("Unauthorized access via IDOR"), and a review of
+# this file quotes every string in the list.
 #
 # Deliberately biased toward missing: a missed diagnostic is recorded and
 # flagged by record_review, a false match destroys a real review. So a run-on
 # like "Please sign in to continue" is knowingly not matched.
+#
+# Scope, stated honestly: these are grok's shapes, and only grok's gate uses it.
+# claude's real diagnostic is a compound line ("Not logged in · Please run
+# /login") and codex's include "sign in again" and "refresh token" — none of
+# which match this deliberately strict form. Their auth handling lives in their
+# own report_failure_* functions; do not wire this into their gates.
 AUTH_DIAG_LINE_RE='^[[:space:]]*(error:[[:space:]]*)?(you are[[:space:]]+)?(not signed in|not logged in|please log ?in|please sign in|token_expired|invalid api key|(http[[:space:]]+)?401[[:space:]]+unauthorized|unauthorized)([[:punct:]]|[[:space:]]*$)'
 
-# Auth text at the top of a stream. Advisory only — it selects warnings and
-# failure advice, never a discard, so it may read $OUT where the gate must not.
-opens_like_auth() { head -n 5 "$1" 2>/dev/null | grep -qiE "$AUTH_DIAG_LINE_RE"; }
+# ADVISORY pattern — warnings and failure advice, never a discard, so it is
+# free to be loose and to cover all three CLIs' wordings.
+#
+# It is composed FROM the discard pattern rather than restating it, which makes
+# it a superset BY CONSTRUCTION. Two hand-maintained lists drifted apart twice:
+# first over "unauthorized", then over "please log in" — each time a run the
+# gate had killed was told only that the review failed, instead of how to
+# re-authenticate. A comment asserting the invariant did not hold it; this does.
+AUTH_ADVICE_RE="$AUTH_DIAG_LINE_RE|token_expired|refresh token|not (logged|signed) in|sign ?in|log ?in|401|api key|unauthorized|authenticat"
+auth_advice() { grep -qiE "$AUTH_ADVICE_RE" "$1" 2>/dev/null; }
+# Auth text at the TOP of a stream — advisory, so it may read $OUT where the
+# gate must not.
+opens_like_auth() { head -n 5 "$1" 2>/dev/null | grep -qiE "$AUTH_ADVICE_RE"; }
 
 # grok can exit 0 having never reviewed. Only CLI-owned signals may condemn a
 # run: $OUT being empty, its FIRST line being grok's session-construction
@@ -556,11 +574,7 @@ report_failure_claude() {
 # miss went unnoticed (observed in-box 2026-07-29): the old pattern looked for
 # "not logged in" and "sign in", and "sign in" != "signed in".
 report_failure_grok() {
-  # Loose on stderr, anchored on stdout. Nothing here discards, so the loose
-  # half is free — but it must stay a superset of the gate's list, or a run the
-  # gate killed for "unauthorized" gets told only that the review failed.
-  if grep -qiE 'token_expired|refresh token|not (logged|signed) in|sign in|401|invalid api key|unauthorized' "$DBG" 2>/dev/null \
-     || opens_like_auth "$OUT"; then
+  if auth_advice "$DBG" || opens_like_auth "$OUT"; then
     echo "byre-codereview: grok may need re-authentication (its ~6h tokens refresh silently until the chain dies)." >&2
     echo "  Run 'byre shell', then: grok-login (or: grok login --device-auth)" >&2
     echo "  Debug log: $DBG" >&2

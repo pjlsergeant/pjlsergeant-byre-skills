@@ -1,6 +1,6 @@
 [package]
 id = "pjlsergeant/codereview"
-version = "1.1.8"
+version = "1.1.9"
 kind = "skill"
 package_api = 1
 requires_byre = ">=0.1.10"
@@ -20,7 +20,7 @@ file = "context.md"
 [[package.files]]
 src = "codereview.sh"
 dest = "codereview.sh"
-sha256 = "03e0fadcb1aae5438524063338176ec34b0e7bb88623e2bbe481acf76ec68d95"
+sha256 = "c450af06ed8e9d25df086cfb3d37289bbfa9536db4e21c3dd57639a36751d1af"
 
 [[package.files]]
 src = "codex-login.sh"
