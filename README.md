@@ -47,7 +47,7 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 byre-codereview -- the independent second-opinion review loop.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.2/skills/codereview/skill.toml --digest sha256:3d0bf433dfab52ad947e125987d50b44aa47000414bbe14023bbcf80277ade86
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.4/skills/codereview/skill.toml --digest sha256:5dca57d7fd4102709adf0198ad78e1368cb747736d9a59516cd0239a195091be
 ```
 
 ### pjlsergeant/toolbox
@@ -83,11 +83,11 @@ codex login just works and this package needs no login flow, volume, or egress
 of its own. Note it **costs real money per scan** -- see the skill's own
 guidance on capping it -- and it needs byre >= 1.2.0.
 
-Not yet in the preset above: it is pinned at release time, and it would raise
-the whole preset's byre floor to 1.2.0.
+It is the one package that raises the preset's byre floor to 1.2.0 (every
+other package needs only >= 0.1.10 or >= 1.0.0).
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/TAG-TO-FILL/skills/codex-security/skill.toml --digest sha256:DIGEST-TO-FILL
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.4/skills/codex-security/skill.toml --digest sha256:313e46ed62e1d84db1363120f7952d6977a9429ed7f1fcc60f417df836524bae
 ```
 
 ### pjlsergeant/ngrok
