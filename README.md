@@ -57,19 +57,6 @@ of upstream's grill-me (not part of the upstream collection).
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.1/skills/claude-skills-pocock/skill.toml --digest sha256:640fc098b8c1cdb03861884db804b20dc453e71903631135f4c1b4bf914a8422
 ```
 
-### pjlsergeant/codex-security
-
-OpenAI's `codex-security` scanner -- scan, validate, patch and export security
-findings. A companion to the `codex` skill: it bundles its own codex binary but
-reads `auth.json` from the codex skill's state volume, so the box's existing
-codex login just works and this package needs no login flow, volume, or egress
-of its own. Note it **costs real money per scan** -- see the skill's own
-guidance on capping it -- and it needs byre >= 1.2.0.
-
-```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.4/skills/codex-security/skill.toml --digest sha256:313e46ed62e1d84db1363120f7952d6977a9429ed7f1fcc60f417df836524bae
-```
-
 ### pjlsergeant/ngrok
 
 The `ngrok` CLI (installed from ngrok's own apt repo, since it's not in
