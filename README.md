@@ -103,11 +103,19 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 ## Publishing a new version
 
-1. Edit the package's payload files; bump `version` in its `[package]` block.
-2. Regenerate the manifest: `byre skill pack <id> > skills/<name>/skill.toml`
-   (pack prints the new digest).
-3. Commit, tag, push. Update the pinned commands here with the new tag and
+1. If this machine doesn't already hold the package as a local source (fresh
+   checkout, or it's only installed here): `byre skill adopt skills/<name>` --
+   the checkout becomes the store's local source for the id it declares.
+2. Edit the package's payload files; bump `version` in its `[package]` block.
+3. Regenerate the manifest: `byre skill pack <id> -o skills/<name>/skill.toml`
+   (pack prints the new digest). Use `-o`, never a `>` redirect: the shell
+   truncates the target before pack runs, and the manifest is one of pack's
+   inputs -- the redirect spelling destroys it.
+4. Commit, tag, push. Update the pinned commands here with the new tag and
    digest.
+
+Publishing needs byre newer than v1.5.0 (`adopt` and `pack -o`); installing
+does not.
 
 Manifests are relative: payloads are fetched from the same directory as the
 `skill.toml` that names them, so raw GitHub URLs work as-is.
