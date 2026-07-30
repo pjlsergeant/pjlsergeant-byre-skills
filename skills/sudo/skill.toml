@@ -3,7 +3,7 @@ id = "pjlsergeant/sudo"
 version = "1.0.0"
 kind = "skill"
 package_api = 1
-requires_byre = ">=0.1.10"
+requires_byre = ">=1.6.0"
 description = "Passwordless sudo for the dev user -- full root inside the box."
 
 [build]
@@ -14,11 +14,10 @@ apt = ["sudo"]
 # a COPYed payload would carry the checkout's umask bits. The trailing
 # `visudo -c` fails the build on a syntax error instead of shipping a box
 # where every sudo invocation is broken. 0440 is sudo's required mode.
-# PAM's account phase needs dev to have an /etc/shadow record; byre writes
-# it in the core block since 98bec89b (first release after v1.5.0). RELEASE
-# BLOCKER: bump requires_byre to that release once it exists -- on older
-# byre there is no shadow record and sudo dies with "account validation
-# failure" before NOPASSWD is consulted.
+# PAM's account phase needs dev to have an /etc/shadow record; byre's core
+# block writes it since v1.6.0 -- hence the requires_byre floor above. On
+# older byre there is no shadow record and sudo dies with "account
+# validation failure" before NOPASSWD is consulted.
 dockerfile = ["RUN echo 'dev ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/dev && chmod 0440 /etc/sudoers.d/dev && visudo -c"]
 
 [context]
