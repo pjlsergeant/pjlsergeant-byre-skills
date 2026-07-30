@@ -85,7 +85,7 @@ but it does let the agent undo any in-image hardening, so don't pair it with
 boxes whose posture depends on the agent staying unprivileged.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/TAG-TO-FILL/skills/sudo/skill.toml --digest sha256:DIGEST-TO-FILL
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.5/skills/sudo/skill.toml --digest sha256:bb745f41b7e52fabb41caba45672fe1bd2c7ca678f287bdff648793da02f4204
 ```
 
 ## Publishing a new version
