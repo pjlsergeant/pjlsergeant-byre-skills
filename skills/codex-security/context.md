@@ -28,6 +28,40 @@ pinned independently, so check it is on PATH before reaching for it
 rather than assuming. In a shared-auth box the brick hits every box
 sharing the credential, same remedy.
 
+## Sandbox: what this skill turns off, and what the host must provide
+
+The scan agent runs every command inside bubblewrap, which needs
+unprivileged user namespaces. Docker's defaults block that twice over --
+the seccomp filter refuses creating the namespace, and the docker-default
+AppArmor profile denies the mounts bwrap performs next -- so since 1.1.0
+this skill ships `run_args`:
+
+    --security-opt seccomp=unconfined --security-opt apparmor=unconfined
+
+**This removes the box's syscall filter and LSM confinement entirely.**
+What remains of the container boundary is namespaces, capabilities,
+mounts, and the runtime itself. Treat the box accordingly: mount nothing
+into it you wouldn't hand to the scan agent -- no docker socket, no broad
+host directories, no credentials beyond what the scan needs. byre's grant
+review shows the raw flags at enable time and `byre status` degrades the
+box's claims while they're live; that is correct, not a bug.
+
+One prerequisite the skill cannot ship (Ubuntu 24.04+ hosts): the flags
+make box processes unconfined, and `kernel.apparmor_restrict_unprivileged_userns=1`
+(the Ubuntu default) cripples user namespaces for exactly those -- scans
+die at `uid_map: Operation not permitted`. The HOST must set it to 0:
+
+    sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+    echo 'kernel.apparmor_restrict_unprivileged_userns=0' | sudo tee /etc/sysctl.d/99-userns.conf
+
+(Recipe verified end-to-end 2026-07-30: default box -> userns blocked by
+seccomp; seccomp off alone -> bwrap's mounts blocked by docker-default;
+both flags + host sysctl 0 -> full bwrap pattern works.)
+
+Probe before spending: `codex sandbox true` exercises the whole stack in
+milliseconds for $0. If it fails, a scan will burn ~$1/2min producing an
+empty directory and a misleading save error (see the wart below).
+
 ## Cost: real money per scan -- always cap it
 
 A standard-mode scan of a five-line toy repo cost ~$1.60 (measured
@@ -48,9 +82,13 @@ Inference and auth ride the codex skill's grants. `bulk-scan`'s GitHub
 repository discovery additionally needs `api.github.com` -- grant it in
 the box config if you use that verb.
 
-## Known wart (v0.1.0)
+## Known wart (v0.1.x)
 
-Observed 2026-07-29: a scan can complete and then fail to save with
-"scan-manifest.json: expected a regular file inside the scan directory",
-leaving partial output in the scans dir (the error names the path).
-Check that dir before assuming a failed scan produced nothing.
+A scan can appear to complete and then fail to save with
+"scan-manifest.json: expected a regular file inside the scan directory".
+Root cause (openai/codex-security#20): when the bwrap sandbox cannot
+start, every agent command fails, the agent writes no artifacts, and
+finalization surfaces this error anyway -- after the scan's full cost in
+time and tokens. If you hit it with an empty scans dir, suspect the
+sandbox first: run `codex sandbox true` and re-check the requirements in
+the Sandbox section above.

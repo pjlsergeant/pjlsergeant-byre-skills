@@ -7,7 +7,7 @@ companion_for = "codex"
 
 [package]
 id = "pjlsergeant/codex-security"
-version = "1.0.1"
+version = "1.1.0"
 kind = "skill"
 package_api = 1
 requires_byre = ">=1.2.0"
@@ -32,6 +32,21 @@ dockerfile = [
 # GitHub discovery wants api.github.com -- a box that uses that verb grants
 # it in its own config (convenience never justifies a default grant).
 
+# LARGE WARNING: these flags remove the box's syscall filter and LSM
+# confinement. The scan agent runs inside bubblewrap, which needs
+# unprivileged user namespaces; Docker's default seccomp blocks creating
+# them and docker-default AppArmor denies the mounts bwrap makes next, so
+# without these flags every scan fails (empty output, misleading save
+# error -- upstream #20). What remains of the boundary: namespaces,
+# capabilities, mounts, the runtime. Mount nothing into a box running this
+# skill that you wouldn't hand to the scan agent. Ubuntu 24.04+ hosts must
+# ALSO set kernel.apparmor_restrict_unprivileged_userns=0 (see context.md)
+# -- a host sysctl no skill can ship. byre surfaces these raw flags in the
+# grant review and degrades the box's claims in status; both are correct.
+# Recipe verified end-to-end 2026-07-30 (probe matrix in context.md).
+[runtime]
+run_args = ["--security-opt", "seccomp=unconfined", "--security-opt", "apparmor=unconfined"]
+
 [context]
 file = "context.md"
 
@@ -39,5 +54,5 @@ file = "context.md"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "32bad6b2b3e1c8c0d8edfcef9ba25c695292d9d1515e3d62f2b5ab1d3600ae9b"
+sha256 = "32d3db24ef73b02f7ae17b12c40a386e5f63409343558aa3a697e192ff0ab966"
 
