@@ -14,7 +14,14 @@ apt = ["sudo"]
 # a COPYed payload would carry the checkout's umask bits. The trailing
 # `visudo -c` fails the build on a syntax error instead of shipping a box
 # where every sudo invocation is broken. 0440 is sudo's required mode.
-dockerfile = ["RUN echo 'dev ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/dev && chmod 0440 /etc/sudoers.d/dev && visudo -c"]
+# The shadow line: byre creates `dev` by editing /etc/passwd directly and
+# never writes an /etc/shadow entry, so PAM's account phase fails ("account
+# validation failure, is your account locked?") before NOPASSWD is consulted.
+# `*` = no password will ever authenticate (sudo here never needs one); the
+# empty third field disables password aging (0 there would mean "must change
+# at next login", which PAM also refuses). Guarded so a base image that
+# already ships a dev shadow entry keeps its own.
+dockerfile = ["RUN getent shadow dev >/dev/null || echo 'dev:*::0:99999:7:::' >> /etc/shadow", "RUN echo 'dev ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/dev && chmod 0440 /etc/sudoers.d/dev && visudo -c"]
 
 [context]
 file = "context.md"
