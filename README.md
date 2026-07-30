@@ -11,28 +11,11 @@ with. A git tag is a convention, not an integrity guarantee -- the `--digest`
 pin is what makes the command end-to-end verifiable. Installing grants
 nothing: a package only takes effect when a box's config enables it.
 
-## The whole setup as one preset
-
-`presets/pjlsergeant.preset` composes everything here into one box: Claude as
-the agent, codex + gemini riding along, plus all the packages below. In your
-project:
-
-```
-byre preset apply https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/main/presets/pjlsergeant.preset
-```
-
-`apply` shows the composed box's full grant review and walks you through
-installing any packages you don't have -- each install pinned to the tag +
-digest from the preset's `[sources]` table -- before writing anything. The
-preset URL itself rides `main` (so it tracks the newest pins); the packages
-it installs are still digest-verified end to end.
-
-Then `byre develop`, and log each CLI in once per project: Claude via
-`/login` in-session, codex via `codex login --device-auth` (plain
-`codex login` needs a browser the box doesn't have), gemini via its Google
-OAuth flow on first use.
-
 ## Packages
+
+Install the packages you want individually with the pinned commands below,
+then enable each one in your box's config. (There used to be an all-in-one
+preset here; it was walked back -- pick per project instead.)
 
 ### pjlsergeant/devlog
 
@@ -83,9 +66,6 @@ codex login just works and this package needs no login flow, volume, or egress
 of its own. Note it **costs real money per scan** -- see the skill's own
 guidance on capping it -- and it needs byre >= 1.2.0.
 
-It is the one package that raises the preset's byre floor to 1.2.0 (every
-other package needs only >= 0.1.10 or >= 1.0.0).
-
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.4/skills/codex-security/skill.toml --digest sha256:313e46ed62e1d84db1363120f7952d6977a9429ed7f1fcc60f417df836524bae
 ```
@@ -104,6 +84,21 @@ for upstream's license and copyright.
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.3/skills/ngrok/skill.toml --digest sha256:042c582921074a8325f1903481dfb2118343dd6aeea4ff57bd45a29329850764
+```
+
+### pjlsergeant/sudo
+
+Passwordless sudo for the `dev` user -- full root inside the box. The sudoers
+entry is written by a build-stage `RUN` (not shipped as a payload: sudo
+refuses group-writable sudoers files, and a COPYed payload would carry the
+checkout's umask bits), and `visudo -c` fails the build on a syntax error
+rather than shipping a box where sudo is broken. Root in the container grants
+nothing on the host beyond what the box's mounts and network already allow --
+but it does let the agent undo any in-image hardening, so don't pair it with
+boxes whose posture depends on the agent staying unprivileged.
+
+```
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/TAG-TO-FILL/skills/sudo/skill.toml --digest sha256:DIGEST-TO-FILL
 ```
 
 ## Publishing a new version
