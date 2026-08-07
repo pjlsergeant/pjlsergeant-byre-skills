@@ -20,7 +20,7 @@ file = "context.md"
 [[package.files]]
 src = "codereview.sh"
 dest = "codereview.sh"
-sha256 = "733b314015ef5bd7e7546849eaafc5c03117502ab33bad88a009c66077f307ab"
+sha256 = "cf077dfe51006c4c4ee6f727ac19cea5f784beb2587419ae13b71f6eec14072c"
 
 [[package.files]]
 src = "codex-login.sh"

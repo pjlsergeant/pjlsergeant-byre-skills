@@ -355,8 +355,12 @@ run_resume_codex() {
   if codex exec resume --skip-git-repo-check --json -c sandbox_mode="danger-full-access" \
        "$sid" "$PROMPT" --output-last-message "$OUT" < /dev/null > "$DBG" 2>&1; then
     new=$(extract_codex_session); [ -n "$new" ] && [ "$new" != "null" ] && echo "$new" > "$SESSION_FILE"
-    if [ -s "$OUT" ]; then cat "$OUT"; record_review; else echo "(could not extract final message; raw: $DBG)"; fi
-    cleanup
+    # No extractable message: keep $DBG — cleanup would delete the very file
+    # the notice points at (a raw --continue can legitimately end with no
+    # final text, and an extraction failure needs the log even more).
+    if [ -s "$OUT" ]; then cat "$OUT"; record_review; cleanup; else
+      echo "(could not extract final message; raw kept at: $DBG)"; rm -f "$OUT"
+    fi
   else
     echo "Resume failed — falling back to a fresh review." >&2
     rm -f "$SESSION_FILE"; run_fresh_codex
@@ -677,8 +681,11 @@ run_resume_opencode() {
   local sid="$1"
   echo "Continuing previous review session (opencode) — this may take several minutes..."
   if run_opencode --session "$sid"; then
-    if [ -s "$OUT" ]; then cat "$OUT"; record_review; else echo "(could not extract final message; raw: $DBG)"; fi
-    cleanup
+    # Same no-message handling as the codex resume: keep $DBG, since the
+    # notice points at it and cleanup would delete it.
+    if [ -s "$OUT" ]; then cat "$OUT"; record_review; cleanup; else
+      echo "(could not extract final message; raw kept at: $DBG)"; rm -f "$OUT"
+    fi
   else
     [ -s "$OUT" ] && cat "$OUT" >&2
     echo "Resume failed — falling back to a fresh review." >&2
