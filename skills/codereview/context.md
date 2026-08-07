@@ -5,9 +5,9 @@ byre placed this guidance here; it applies to every session in this box.
 ## Run a review after each feature or fix
 
 This box ships `byre-codereview` — an independent reviewer (Codex by default;
-`--reviewer grok|claude` or `BYRE_REVIEWER=...` picks another installed one).
-After completing any feature or fix, run it yourself and act on the findings;
-don't ask permission first.
+`--reviewer grok|claude|opencode` or `BYRE_REVIEWER=...` picks another
+installed one). After completing any feature or fix, run it yourself and act
+on the findings; don't ask permission first.
 
 ```sh
 byre-codereview                       # review the current changes
@@ -19,7 +19,10 @@ byre-codereview --raw "prompt"        # your prompt verbatim (no built-in review
 
 Prefer a reviewer that ISN'T the model driving this session: same-model review
 is a second pass, not a second opinion. `--reviewer claude` is there for boxes
-where claude is the only CLI.
+where claude is the only CLI. Note that `--reviewer opencode` says nothing
+about the model: opencode is a meta-CLI, and the review runs on whatever model
+the box's opencode config defaults to — check that config when independence
+matters.
 
 The loop: run it → read every finding → for each, fix it or note why you're
 leaving it → if you changed anything, re-run with `--continue` → stop only when
@@ -33,9 +36,9 @@ review.
 
 A **fresh** or **blinded** review means running **without `--continue`** — and
 that is the whole of what those words mean here. `--continue` resumes the
-reviewer's prior session (codex `exec resume`, grok/claude `--resume`), so the
-reviewer still has its own earlier findings, and your replies to them, in
-context. That makes a resumed run a re-read of a conversation it is already
+reviewer's prior session (codex `exec resume`, grok/claude `--resume`,
+opencode `--session`), so the reviewer still has its own earlier findings, and
+your replies to them, in context. That makes a resumed run a re-read of a conversation it is already
 invested in: it is prone to accept "fixed" at your word and to repeat its own
 framing. Omit the flag and the reviewer starts from an empty context and sees
 only the code.
@@ -67,3 +70,9 @@ complete in a no-browser sandbox. They need a terminal to show the URL and
 code, so **you cannot run them yourself from a tool call** — if
 `byre-codereview` reports an authentication failure, tell the user to run
 `byre shell` and then the relevant helper.
+
+opencode needs no helper: `opencode auth login` is already a terminal paste
+flow. It is still interactive, so the same rule applies — the user runs it in
+`byre shell`, never you from a tool call. opencode also needs a tool-capable
+default model (`model` in the global opencode config); the review script names
+that fix when a run fails on it.

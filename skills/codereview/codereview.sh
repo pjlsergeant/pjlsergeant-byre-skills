@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # byre-codereview — an independent second-opinion review of the current changes.
 # Shipped by the codereview skill; pairs with a reviewer skill that installs the
-# reviewer binary: codex (the default), grok, and/or claude. Reviews the working
-# tree's git changes and prints findings, and appends them to
+# reviewer binary: codex (the default), grok, claude, and/or opencode. Reviews
+# the working tree's git changes and prints findings, and appends them to
 # .byre-devlog/reviews.md.
 #
 #   byre-codereview                        # review current changes (codex)
@@ -36,7 +36,7 @@ Usage:
   byre-codereview                        review current changes
   byre-codereview "focus area"           review current changes, focused on a topic
   byre-codereview --continue "..."       re-check after fixes (resumes prior session)
-  byre-codereview --reviewer <name> ...  choose the reviewer: codex (default) | grok | claude
+  byre-codereview --reviewer <name> ...  choose the reviewer: codex (default) | grok | claude | opencode
   byre-codereview --raw "prompt"         send YOUR prompt verbatim (skips the
                                          built-in review prompt; mechanics stay)
   byre-codereview --raw -- "--anything"  -- ends option parsing, so option-shaped
@@ -75,7 +75,7 @@ for arg in "$@"; do
   esac
 done
 if [ "$expect_reviewer" = true ]; then
-  echo "byre-codereview: --reviewer needs a value (codex | grok | claude)." >&2
+  echo "byre-codereview: --reviewer needs a value (codex | grok | claude | opencode)." >&2
   exit 2
 fi
 if [ "$RAW" = true ] && [ "${#FOCUS[@]}" -eq 0 ]; then
@@ -84,9 +84,9 @@ if [ "$RAW" = true ] && [ "${#FOCUS[@]}" -eq 0 ]; then
 fi
 
 case "$REVIEWER" in
-  codex|grok|claude) ;;
+  codex|grok|claude|opencode) ;;
   *)
-    echo "byre-codereview: unsupported reviewer '$REVIEWER' (codex | grok | claude)." >&2
+    echo "byre-codereview: unsupported reviewer '$REVIEWER' (codex | grok | claude | opencode)." >&2
     exit 2
     ;;
 esac
@@ -94,7 +94,7 @@ esac
 if ! command -v "$REVIEWER" >/dev/null 2>&1; then
   echo "byre-codereview: $REVIEWER not found on PATH." >&2
   echo "  Add the $REVIEWER skill (skills = [\"$REVIEWER\", \"codereview\"]) and rebuild." >&2
-  for other in codex grok claude; do
+  for other in codex grok claude opencode; do
     [ "$other" = "$REVIEWER" ] && continue
     if command -v "$other" >/dev/null 2>&1; then
       echo "  ($other is available: byre-codereview --reviewer $other)" >&2
@@ -122,9 +122,10 @@ LOG_FILE="$REVIEW_DIR/reviews.md"
 # is meaningless. The codex file keeps its historical name so a box upgraded
 # mid-loop can still --continue.
 case "$REVIEWER" in
-  codex)  SESSION_FILE="$REVIEW_DIR/.review-session" ;;
-  grok)   SESSION_FILE="$REVIEW_DIR/.review-session-grok" ;;
-  claude) SESSION_FILE="$REVIEW_DIR/.review-session-claude" ;;
+  codex)    SESSION_FILE="$REVIEW_DIR/.review-session" ;;
+  grok)     SESSION_FILE="$REVIEW_DIR/.review-session-grok" ;;
+  claude)   SESSION_FILE="$REVIEW_DIR/.review-session-claude" ;;
+  opencode) SESSION_FILE="$REVIEW_DIR/.review-session-opencode" ;;
 esac
 
 # RUN_NOTE annotates the "Running..." line: raw mode says so instead of echoing
@@ -139,11 +140,11 @@ the tree contaminates the thing under review.
 
 NEVER run an authentication command of any CLI — no `login`, `logout`, `auth`,
 or credential-writing subcommand, not even to check whether something works.
-`codex login --with-api-key`, `grok login`, and friends WRITE credential state
-that is shared with the rest of the box and is NOT covered by the tree
-tripwire, so nothing will catch it and nothing will roll it back. A reviewer
-doing this has already logged a box out in the middle of a review loop, taking
-the author's tooling down with it.
+`codex login --with-api-key`, `grok login`, `opencode auth login`, and friends
+WRITE credential state that is shared with the rest of the box and is NOT
+covered by the tree tripwire, so nothing will catch it and nothing will roll
+it back. A reviewer doing this has already logged a box out in the middle of a
+review loop, taking the author's tooling down with it.
 
 To be explicit about the line: `codex login --help` and `grok login --help` are
 FINE and are the intended way to check what an auth flag does — `--help` prints
@@ -188,8 +189,9 @@ cleanup() { rm -f "$OUT" "$DBG"; }
 
 # Snapshot of the working tree the reviewer must not change. NOTE the limit of
 # what this can police: it covers the git working tree and nothing else. State
-# outside it — credentials (~/.codex/auth.json, ~/.grok), other volumes, the
-# rest of $HOME — is invisible here, so a reviewer that clobbers a login is
+# outside it — credentials (~/.codex/auth.json, ~/.grok, opencode's
+# ~/.local/share/opencode/auth.json), other volumes, the rest of $HOME — is
+# invisible here, so a reviewer that clobbers a login is
 # caught by nobody (observed 2026-07-29: a reviewer ran `codex login
 # --with-api-key` as a "probe" and logged the box out). The prompt above bans
 # that explicitly because the tripwire structurally cannot.
@@ -562,6 +564,151 @@ report_failure_claude() {
   fi
 }
 
+# opencode reviewer notes (all claims verified in-box 2026-08-07, opencode
+# 1.18.15, against the source in the box).
+# - INDEPENDENCE CAVEAT, sharper than claude's: opencode is a meta-CLI — the
+#   model it runs is whatever the box's opencode config defaults to, which can
+#   be the same family as the authoring agent. The reviewer name tells you
+#   nothing about the model; check the box's opencode config if independence
+#   matters.
+# - Enforcement, honest ordering as ever: the box boundary and the tripwire
+#   are what actually hold; the rest is best-effort narrowing — and opencode's
+#   narrowing is the strongest of the four:
+#     --agent plan            file edits DENIED by permission (write/edit/patch
+#                             all gate on the "edit" permission), and the
+#                             edit-capable "general" subagent denied with them.
+#                             bash stays for git reads and cheap probes — free-
+#                             form writes remain POSSIBLE; that's the tripwire's
+#                             job.
+#     OPENCODE_PERMISSION     merged into config AFTER every config file, so
+#                             its edit/todowrite deny holds even against a
+#                             repo or global config that re-allows them.
+#     OPENCODE_DISABLE_PROJECT_CONFIG=1
+#                             the --safe-mode analog: the REVIEWED repo's
+#                             .opencode/opencode.json (plugins, MCP servers,
+#                             permission overrides — code that would run at
+#                             reviewer startup) never loads. Global config and
+#                             auth still do. NOT --pure: that strips the box
+#                             owner's own plugins, which can carry the auth
+#                             provider the reviewer rides on.
+#     OPENCODE_DISABLE_AUTOUPDATE=1
+#                             a review run must not rewrite the reviewer binary.
+# - Headless permission model: any "ask" is auto-REJECTED (a deny the model
+#   sees and works around — not grok's silent death). The plan agent leaves
+#   bash on the allow path, so probes run without asking; external-directory
+#   asks reject, confining the reviewer to the repo.
+# - The PROMPT rides stdin: `run` re-quotes argv words containing spaces and
+#   escapes their inner quotes (run.ts builds the message back out of shell
+#   words), which mangles a prompt passed as one big argument. Piped stdin is
+#   passed through verbatim.
+# - --format json: all UI chrome goes to stderr; stdout is clean JSONL, every
+#   event stamped with the run's sessionID. Failures (provider 4xx, "Session
+#   not found") arrive as "error" events on STDOUT with exit 1, so the debug
+#   log below is stdout(events)+stderr appended.
+# - No session pre-assignment (--session must name an EXISTING session), so
+#   unlike the others the id is extracted from the event stream after the run.
+#   Ids are ses_ + 12 hex + 14 base62 chars — case-SENSITIVE, which is why the
+#   dispatch at the bottom must not lowercase them.
+# - A logged-out opencode does not necessarily fail: it ships free zero-auth
+#   models. The failure modes that DO occur are a provider auth error and a
+#   default model that can't do tool use (both land as error events);
+#   report_failure_opencode names the fix for each.
+OPENCODE_REVIEW_PERMS='{"edit":"deny","todowrite":"deny"}'
+
+# Final report = the text parts of the LAST assistant message, joined. Joining
+# (rather than taking only the last part) keeps a report the model split
+# across parts; unique_by drops any re-emitted part update and sorts by part
+# id, which is chronological (ascending ids). fromjson? skips the appended
+# stderr lines.
+extract_opencode_report() {
+  jq -rRs '
+    [ split("\n")[] | fromjson? | select(.type=="text") ]
+    | unique_by(.part.id)
+    | if length==0 then "" else
+        (.[-1].part.messageID) as $m
+        | [ .[] | select(.part.messageID==$m) | .part.text ] | join("\n\n")
+      end' "$DBG" 2>/dev/null || true
+}
+
+extract_opencode_session() {
+  jq -rRs '[ split("\n")[] | fromjson? | .sessionID ] | first // empty' "$DBG" 2>/dev/null || true
+}
+
+# Runs opencode and normalizes its two streams into the usual shape: $DBG =
+# JSONL events then stderr, $OUT = extracted final report. Shared by fresh and
+# resume, which differ only in the session flag. Returns opencode's exit code.
+run_opencode() {
+  local err rc=0
+  err=$(mktemp "$REVIEW_DIR/.err.XXXXXX")
+  printf '%s' "$PROMPT" | OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_AUTOUPDATE=1 \
+      OPENCODE_PERMISSION="$OPENCODE_REVIEW_PERMS" \
+      opencode run --format json --agent plan --title "byre-codereview" "$@" \
+      > "$DBG" 2> "$err" || rc=$?
+  cat "$err" >> "$DBG" 2>/dev/null; rm -f "$err"
+  extract_opencode_report > "$OUT"
+  return "$rc"
+}
+
+run_fresh_opencode() {
+  rm -f "$SESSION_FILE"
+  echo "Running code review (opencode)${RUN_NOTE} — this may take several minutes..."
+  if run_opencode; then
+    # Same empty-output guard as the others: exit 0 with no final message must
+    # not read as a clean review. Raw callers may legitimately want no final
+    # text, so the guard applies only to built-in reviews (codex's rationale).
+    if [ "$RAW" != true ] && [ ! -s "$OUT" ]; then
+      echo "byre-codereview: opencode exited 0 but produced no final message." >&2
+      echo "  Debug log: $DBG" >&2
+      rm -f "$OUT" "$SESSION_FILE"; exit 1
+    fi
+    sid=$(extract_opencode_session)
+    [ -n "$sid" ] && echo "$sid" > "$SESSION_FILE" || rm -f "$SESSION_FILE"
+    cat "$OUT"; record_review; cleanup
+  else
+    # Partial-output courtesy, as everywhere: a report extracted from a failed
+    # run still beats a bare log path.
+    [ -s "$OUT" ] && cat "$OUT" >&2
+    report_failure_opencode
+    rm -f "$OUT" "$SESSION_FILE"; exit 1
+  fi
+}
+
+run_resume_opencode() {
+  local sid="$1"
+  echo "Continuing previous review session (opencode) — this may take several minutes..."
+  if run_opencode --session "$sid"; then
+    if [ -s "$OUT" ]; then cat "$OUT"; record_review; else echo "(could not extract final message; raw: $DBG)"; fi
+    cleanup
+  else
+    [ -s "$OUT" ] && cat "$OUT" >&2
+    echo "Resume failed — falling back to a fresh review." >&2
+    rm -f "$SESSION_FILE"; run_fresh_opencode
+  fi
+}
+
+# Advice-only, so loose patterns are fine (grok's report_failure rationale).
+# First surface the machine-readable error events — in --format json the actual
+# failure text lands on stdout as an error event, not on stderr — then name the
+# fix for the two failure shapes seen in-box.
+report_failure_opencode() {
+  jq -rRs '[ split("\n")[] | fromjson? | select(.type=="error")
+             | (.error.data.message // .error.name) // empty ] | unique | join("\n")' \
+    "$DBG" 2>/dev/null | sed 's/^/  /' >&2 || true
+  if grep -qiE '401|unauthorized|invalid api key|authenticat' "$DBG" 2>/dev/null; then
+    echo "byre-codereview: opencode's provider rejected the request — its login/key may have expired." >&2
+    echo "  Re-authenticate in another terminal: run 'byre shell', then 'opencode auth login'" >&2
+    echo "  (a terminal paste flow — no browser needed, so no wrapper script exists for it)." >&2
+    echo "  Debug log: $DBG" >&2
+  elif grep -qiE 'no endpoints found|model not found|does not support tool' "$DBG" 2>/dev/null; then
+    echo "byre-codereview: opencode's default model can't run the review (no tool support, or not found)." >&2
+    echo "  Set a tool-capable default model in the box's global opencode config" >&2
+    echo "  (~/.config/opencode/opencode.json, e.g. {\"model\": \"openrouter/...\"})." >&2
+    echo "  Debug log: $DBG" >&2
+  else
+    echo "byre-codereview: review failed. Debug log: $DBG" >&2
+  fi
+}
+
 # Chooses which ADVICE a run that has ALREADY failed prints. Nothing here can
 # discard anything, which is exactly why it may read what the gate must not:
 # a wrong guess costs a wasted glance.
@@ -583,9 +730,20 @@ report_failure_grok() {
   fi
 }
 
+# Session-id validation is per-CLI. codex/grok/claude ids are UUIDs, case-
+# folded here because historical session files vary in case. opencode ids are
+# ses_ + 12 hex + 14 base62 chars and case-SENSITIVE — folding one would
+# corrupt it, so that branch must never share the tr.
+valid_session_id() {
+  case "$REVIEWER" in
+    opencode) [[ "$1" =~ ^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$ ]] ;;
+    *) [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] ;;
+  esac
+}
+
 if [ "$CONTINUE" = true ] && [ -f "$SESSION_FILE" ]; then
-  sid=$(tr '[:upper:]' '[:lower:]' < "$SESSION_FILE")
-  if [[ "$sid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+  if [ "$REVIEWER" = opencode ]; then sid=$(cat "$SESSION_FILE"); else sid=$(tr '[:upper:]' '[:lower:]' < "$SESSION_FILE"); fi
+  if valid_session_id "$sid"; then
     "run_resume_$REVIEWER" "$sid"
   else
     rm -f "$SESSION_FILE"; "run_fresh_$REVIEWER"
