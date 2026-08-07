@@ -22,7 +22,15 @@ is a second pass, not a second opinion. `--reviewer claude` is there for boxes
 where claude is the only CLI. Note that `--reviewer opencode` says nothing
 about the model: opencode is a meta-CLI, and the review runs on whatever model
 the box's opencode config defaults to — check that config when independence
-matters.
+matters, or pin the model yourself with the `harness:model` form:
+
+```sh
+byre-codereview --reviewer opencode:openrouter/~openai/gpt-latest "..."
+```
+
+`opencode models` lists what the box can run. Only opencode consumes a model
+today; the other harnesses reject the colon form rather than silently ignore
+it.
 
 The loop: run it → read every finding → for each, fix it or note why you're
 leaving it → if you changed anything, re-run with `--continue` → stop only when

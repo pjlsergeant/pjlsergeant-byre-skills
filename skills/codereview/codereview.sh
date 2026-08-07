@@ -11,7 +11,9 @@
 #   byre-codereview --reviewer grok "..."  # use grok as the reviewer
 #   byre-codereview --raw "prompt"         # your prompt verbatim, no review prompt
 #
-# BYRE_REVIEWER sets the default reviewer (codex when unset).
+# BYRE_REVIEWER sets the default reviewer (codex when unset). A reviewer is
+# "harness" or "harness:model" — see the parsing below; only opencode consumes
+# a model today.
 #
 # --raw replaces the built-in review prompt entirely: the arguments become the
 # whole prompt (required). The mechanics stay — reviewer enforcement flags,
@@ -37,6 +39,8 @@ Usage:
   byre-codereview "focus area"           review current changes, focused on a topic
   byre-codereview --continue "..."       re-check after fixes (resumes prior session)
   byre-codereview --reviewer <name> ...  choose the reviewer: codex (default) | grok | claude | opencode
+                                         opencode also takes a model as opencode:<provider/model>
+                                         (e.g. opencode:openrouter/~openai/gpt-latest)
   byre-codereview --raw "prompt"         send YOUR prompt verbatim (skips the
                                          built-in review prompt; mechanics stay)
   byre-codereview --raw -- "--anything"  -- ends option parsing, so option-shaped
@@ -83,24 +87,51 @@ if [ "$RAW" = true ] && [ "${#FOCUS[@]}" -eq 0 ]; then
   exit 2
 fi
 
+# A reviewer is "harness" or "harness:model": the harness names the CLI, and
+# everything after the FIRST colon is a model spec handed to that harness
+# (model ids may themselves contain slashes, e.g. openrouter/~openai/...).
+# $REVIEWER keeps the full user-given string for display — the Running line
+# and the reviews.md heading show what actually reviewed; $HARNESS drives
+# command lookup, session files, and dispatch. Only opencode consumes a model
+# today; a harness that got one it can't use must FAIL, not silently review
+# with its default while the log claims otherwise.
+HARNESS="$REVIEWER"
+MODEL=""
 case "$REVIEWER" in
+  *:*)
+    HARNESS="${REVIEWER%%:*}"
+    MODEL="${REVIEWER#*:}"
+    # "opencode:" (empty model) means no model — same as bare "opencode".
+    [ -z "$MODEL" ] && REVIEWER="$HARNESS"
+    ;;
+esac
+
+case "$HARNESS" in
   codex|grok|claude|opencode) ;;
   *)
-    echo "byre-codereview: unsupported reviewer '$REVIEWER' (codex | grok | claude | opencode)." >&2
+    echo "byre-codereview: unsupported reviewer '$HARNESS' (codex | grok | claude | opencode)." >&2
     exit 2
     ;;
 esac
 
-if ! command -v "$REVIEWER" >/dev/null 2>&1; then
-  echo "byre-codereview: $REVIEWER not found on PATH." >&2
-  echo "  Add the $REVIEWER skill (skills = [\"$REVIEWER\", \"codereview\"]) and rebuild." >&2
+if ! command -v "$HARNESS" >/dev/null 2>&1; then
+  echo "byre-codereview: $HARNESS not found on PATH." >&2
+  echo "  Add the $HARNESS skill (skills = [\"$HARNESS\", \"codereview\"]) and rebuild." >&2
   for other in codex grok claude opencode; do
-    [ "$other" = "$REVIEWER" ] && continue
+    [ "$other" = "$HARNESS" ] && continue
     if command -v "$other" >/dev/null 2>&1; then
       echo "  ($other is available: byre-codereview --reviewer $other)" >&2
     fi
   done
   exit 127
+fi
+
+# After the PATH check, so a missing harness is reported as the missing
+# harness it is — not as a model-wiring gap it also happens to have.
+if [ -n "$MODEL" ] && [ "$HARNESS" != opencode ]; then
+  echo "byre-codereview: model selection is only wired up for opencode — '$HARNESS' would silently ignore '$MODEL'." >&2
+  echo "  Run '--reviewer $HARNESS' plain, or extend the $HARNESS runner to consume a model." >&2
+  exit 2
 fi
 
 # Persisted artifacts live in .byre-devlog/ at the repo root — a self-ignoring
@@ -121,7 +152,13 @@ LOG_FILE="$REVIEW_DIR/reviews.md"
 # Sessions are per-reviewer: resuming a codex thread with grok (or vice versa)
 # is meaningless. The codex file keeps its historical name so a box upgraded
 # mid-loop can still --continue.
-case "$REVIEWER" in
+# Keyed by harness, not by model: a --continue with a different model resumes
+# the same thread (all four CLIs apply the model per-prompt, not per-session).
+# That crossing is legitimate — handing a thread to a stronger model is a real
+# move — but it must be VISIBLE, so opencode's file carries the reviewer
+# string on a second line and the resume path warns when it differs (surfaced
+# by a deepseek review of this very feature, 2026-08-08).
+case "$HARNESS" in
   codex)    SESSION_FILE="$REVIEW_DIR/.review-session" ;;
   grok)     SESSION_FILE="$REVIEW_DIR/.review-session-grok" ;;
   claude)   SESSION_FILE="$REVIEW_DIR/.review-session-claude" ;;
@@ -644,9 +681,12 @@ extract_opencode_session() {
 run_opencode() {
   local err rc=0
   err=$(mktemp "$REVIEW_DIR/.err.XXXXXX")
+  # ${MODEL:+...} adds --model only when the harness:model form supplied one;
+  # otherwise the box's opencode config picks, as before.
   printf '%s' "$PROMPT" | OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_AUTOUPDATE=1 \
       OPENCODE_PERMISSION="$OPENCODE_REVIEW_PERMS" \
-      opencode run --format json --agent plan --title "byre-codereview" "$@" \
+      opencode run --format json --agent plan --title "byre-codereview" \
+      ${MODEL:+--model "$MODEL"} "$@" \
       > "$DBG" 2> "$err" || rc=$?
   cat "$err" >> "$DBG" 2>/dev/null; rm -f "$err"
   extract_opencode_report > "$OUT"
@@ -655,7 +695,7 @@ run_opencode() {
 
 run_fresh_opencode() {
   rm -f "$SESSION_FILE"
-  echo "Running code review (opencode)${RUN_NOTE} — this may take several minutes..."
+  echo "Running code review (${REVIEWER})${RUN_NOTE} — this may take several minutes..."
   if run_opencode; then
     # Same empty-output guard as the others: exit 0 with no final message must
     # not read as a clean review. Raw callers may legitimately want no final
@@ -666,7 +706,8 @@ run_fresh_opencode() {
       rm -f "$OUT" "$SESSION_FILE"; exit 1
     fi
     sid=$(extract_opencode_session)
-    [ -n "$sid" ] && echo "$sid" > "$SESSION_FILE" || rm -f "$SESSION_FILE"
+    # Line 2 records WHO started the thread (see the SESSION_FILE comment).
+    [ -n "$sid" ] && printf '%s\n%s\n' "$sid" "$REVIEWER" > "$SESSION_FILE" || rm -f "$SESSION_FILE"
     cat "$OUT"; record_review; cleanup
   else
     # Partial-output courtesy, as everywhere: a report extracted from a failed
@@ -679,7 +720,17 @@ run_fresh_opencode() {
 
 run_resume_opencode() {
   local sid="$1"
-  echo "Continuing previous review session (opencode) — this may take several minutes..."
+  # A resume under a different reviewer string feeds the OLD model's thread —
+  # its findings, your replies — to the new one while the Running line and the
+  # reviews.md heading name only the new one. Legitimate, but never silent.
+  # Warn-only, and absent line 2 (a pre-1.3.0 session file) says nothing.
+  local prev; prev=$(sed -n 2p "$SESSION_FILE" 2>/dev/null || true)
+  if [ -n "$prev" ] && [ "$prev" != "$REVIEWER" ]; then
+    echo "byre-codereview: note — resuming a session started by '$prev' as '$REVIEWER':" >&2
+    echo "  the thread's earlier turns are the old model's. For an unprimed opinion" >&2
+    echo "  from '$REVIEWER', run without --continue." >&2
+  fi
+  echo "Continuing previous review session (${REVIEWER}) — this may take several minutes..."
   if run_opencode --session "$sid"; then
     # Same no-message handling as the codex resume: keep $DBG, since the
     # notice points at it and cleanup would delete it.
@@ -707,8 +758,9 @@ report_failure_opencode() {
     echo "  (a terminal paste flow — no browser needed, so no wrapper script exists for it)." >&2
     echo "  Debug log: $DBG" >&2
   elif grep -qiE 'no endpoints found|model not found|does not support tool' "$DBG" 2>/dev/null; then
-    echo "byre-codereview: opencode's default model can't run the review (no tool support, or not found)." >&2
-    echo "  Set a tool-capable default model in the box's global opencode config" >&2
+    echo "byre-codereview: opencode's model can't run the review (no tool support, or not found)." >&2
+    echo "  Pass a tool-capable model: --reviewer opencode:<provider/model> ('opencode models'" >&2
+    echo "  lists them), or set a default in the box's global opencode config" >&2
     echo "  (~/.config/opencode/opencode.json, e.g. {\"model\": \"openrouter/...\"})." >&2
     echo "  Debug log: $DBG" >&2
   else
@@ -742,19 +794,21 @@ report_failure_grok() {
 # ses_ + 12 hex + 14 base62 chars and case-SENSITIVE — folding one would
 # corrupt it, so that branch must never share the tr.
 valid_session_id() {
-  case "$REVIEWER" in
+  case "$HARNESS" in
     opencode) [[ "$1" =~ ^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$ ]] ;;
     *) [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] ;;
   esac
 }
 
 if [ "$CONTINUE" = true ] && [ -f "$SESSION_FILE" ]; then
-  if [ "$REVIEWER" = opencode ]; then sid=$(cat "$SESSION_FILE"); else sid=$(tr '[:upper:]' '[:lower:]' < "$SESSION_FILE"); fi
+  # opencode's file is two lines (id, then reviewer string) — only line 1 is
+  # the id; see the SESSION_FILE comment.
+  if [ "$HARNESS" = opencode ]; then sid=$(head -n1 "$SESSION_FILE"); else sid=$(tr '[:upper:]' '[:lower:]' < "$SESSION_FILE"); fi
   if valid_session_id "$sid"; then
-    "run_resume_$REVIEWER" "$sid"
+    "run_resume_$HARNESS" "$sid"
   else
-    rm -f "$SESSION_FILE"; "run_fresh_$REVIEWER"
+    rm -f "$SESSION_FILE"; "run_fresh_$HARNESS"
   fi
 else
-  "run_fresh_$REVIEWER"
+  "run_fresh_$HARNESS"
 fi
