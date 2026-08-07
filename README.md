@@ -30,7 +30,7 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 byre-codereview -- the independent second-opinion review loop.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.4/skills/codereview/skill.toml --digest sha256:5dca57d7fd4102709adf0198ad78e1368cb747736d9a59516cd0239a195091be
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.6/skills/codereview/skill.toml --digest sha256:0a703568603a2b9af0884366ffb10255ff39312d461dda58842a347ed96548fe
 ```
 
 ### pjlsergeant/toolbox
