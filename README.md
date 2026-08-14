@@ -99,7 +99,9 @@ device-login prompt before Z.AI starts. That login is irrelevant to `zai` and
 may be skipped with Ctrl-C; its extra state volume and OpenAI egress are an
 accepted temporary cost of reusing the full built-in Codex skill.
 
-The pinned install command will be added when this package is released.
+```
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.7/skills/zai/skill.toml --digest sha256:4414671f6c43ff3b9f68763dc491458909c207e505145ce1a1908091e20601b9
+```
 
 ### pjlsergeant/zai-shared-auth
 
@@ -120,7 +122,9 @@ rotates the machine-scoped credential for every opted-in project. An explicit
 project `ZAI_API_KEY` overrides the shared file, suppresses the prompt, and
 must instead be replaced at its source.
 
-The pinned install command will be added when this package is released.
+```
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.7/skills/zai-shared-auth/skill.toml --digest sha256:a3e87f18009297bf49a35943745e3896d354be66132102e94c585f988a74de8c
+```
 
 ## Publishing a new version
 
