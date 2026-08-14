@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+# Keep Z.AI's Codex state completely separate from the ordinary Codex agent.
+# The directory is a byre state-volume mount in a built box; mkdir also makes
+# this launcher usable when invoked while assembling or testing an image.
+zai_home=${ZAI_CODEX_HOME:-/home/dev/.zai-codex-home}
+zai_codex=${ZAI_CODEX_BIN:-/home/dev/.zai-codex-dist/bin/codex}
+zai_config_template=${ZAI_CONFIG_TEMPLATE:-/usr/local/share/byre-zai/config.toml}
+zai_models_template=${ZAI_MODELS_TEMPLATE:-/usr/local/share/byre-zai/models.json}
+
+umask 077
+mkdir -p "$zai_home"
+if [ ! -e "$zai_home/config.toml" ]; then
+    cp "$zai_config_template" "$zai_home/config.toml"
+fi
+if [ ! -e "$zai_home/models.json" ]; then
+    cp "$zai_models_template" "$zai_home/models.json"
+fi
+
+if [ ! -x "$zai_codex" ]; then
+    echo "zai: bundled Codex binary is missing at $zai_codex; rebuild the byre box" >&2
+    exit 127
+fi
+
+exec env CODEX_HOME="$zai_home" "$zai_codex" "$@"

@@ -1,0 +1,11 @@
+model = "glm-5.3"
+model_provider = "zai"
+model_reasoning_effort = "max"
+model_catalog_json = "/home/dev/.zai-codex-home/models.json"
+
+[model_providers.zai]
+name = "Z.AI"
+base_url = "https://api.z.ai/api/v1"
+env_key = "ZAI_API_KEY"
+env_key_instructions = "Set ZAI_API_KEY to the API key from https://z.ai/manage-apikey/apikey-list."
+wire_api = "responses"

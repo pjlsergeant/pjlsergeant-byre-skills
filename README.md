@@ -88,6 +88,25 @@ boxes whose posture depends on the agent staying unprivileged.
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.5/skills/sudo/skill.toml --digest sha256:bb745f41b7e52fabb41caba45672fe1bd2c7ca678f287bdff648793da02f4204
 ```
 
+### pjlsergeant/zai
+
+An isolated `zai` command backed by its own bundled Codex CLI, configured for
+Z.AI's GLM Coding Plan. Its binary, `CODEX_HOME`, config, sessions, and history
+are separate from ordinary Codex and every other agent; only the API key is
+forwarded from the host at runtime.
+
+The pinned install command will be added when this package is released.
+
+### pjlsergeant/zai-shared-auth
+
+Optional companion for `pjlsergeant/zai`: stores one static Z.AI API key in a
+machine-scoped identity volume and exports it to every opted-in box. An
+explicit per-project `ZAI_API_KEY` takes precedence. Because `zai` is an
+auxiliary command rather than the selected primary agent, enable this package
+manually alongside `pjlsergeant/zai`.
+
+The pinned install command will be added when this package is released.
+
 ## Publishing a new version
 
 1. If this machine doesn't already hold the package as a local source (fresh
