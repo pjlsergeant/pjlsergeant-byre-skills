@@ -5,9 +5,15 @@ set -eu
 # The directory is a byre state-volume mount in a built box; mkdir also makes
 # this launcher usable when invoked while assembling or testing an image.
 zai_home=${ZAI_CODEX_HOME:-/home/dev/.zai-codex-home}
-zai_codex=${ZAI_CODEX_BIN:-/home/dev/.zai-codex-dist/bin/codex}
 zai_config_template=${ZAI_CONFIG_TEMPLATE:-/usr/local/share/byre-zai/config.toml}
 zai_models_template=${ZAI_MODELS_TEMPLATE:-/usr/local/share/byre-zai/models.json}
+
+zai_codex=$(command -v codex 2>/dev/null || true)
+if [ -z "$zai_codex" ] || [ ! -x "$zai_codex" ]; then
+    echo "zai: codex is required but was not found on PATH" >&2
+    echo "     enable byre's Codex skill in this box, then rebuild it" >&2
+    exit 127
+fi
 
 umask 077
 mkdir -p "$zai_home"
@@ -16,11 +22,6 @@ if [ ! -e "$zai_home/config.toml" ]; then
 fi
 if [ ! -e "$zai_home/models.json" ]; then
     cp "$zai_models_template" "$zai_home/models.json"
-fi
-
-if [ ! -x "$zai_codex" ]; then
-    echo "zai: bundled Codex binary is missing at $zai_codex; rebuild the byre box" >&2
-    exit 127
 fi
 
 exec env CODEX_HOME="$zai_home" "$zai_codex" "$@"

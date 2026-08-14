@@ -90,10 +90,11 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 ### pjlsergeant/zai
 
-An isolated `zai` command backed by its own bundled Codex CLI, configured for
-Z.AI's GLM Coding Plan. Its binary, `CODEX_HOME`, config, sessions, and history
-are separate from ordinary Codex and every other agent; only the API key is
-forwarded from the host at runtime.
+An isolated `zai` command that reuses the existing `codex` executable while
+giving Z.AI its own `CODEX_HOME`, config, sessions, and history. It does not
+install or modify Codex. Enable byre's built-in Codex skill alongside this one
+when the box does not otherwise have `codex` on `PATH`; only the API key is
+forwarded at runtime.
 
 The pinned install command will be added when this package is released.
 

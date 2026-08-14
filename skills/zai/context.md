@@ -1,7 +1,9 @@
 # Z.AI through Codex (byre skill)
 
-`zai` launches a dedicated copy of the Codex CLI configured for Z.AI's GLM
+`zai` launches the Codex CLI with an isolated configuration for Z.AI's GLM
 Coding Plan. Use it anywhere you would use `codex`, including `zai exec ...`.
+It requires `codex` on `PATH`; enable byre's built-in Codex skill alongside
+this package when Codex is not already part of the box.
 
 Set `ZAI_API_KEY` to the key from Z.AI's API-key page. The key is read from the
 environment for each request; it is never written into the image or Codex
@@ -13,8 +15,9 @@ env_from_host = { ZAI_API_KEY = "env:ZAI_API_KEY" }
 
 ## Isolation
 
-The launcher deliberately leaves `HOME` unchanged and sets only its child
-Codex process's `CODEX_HOME` to `/home/dev/.zai-codex-home`. That directory is
+The launcher reuses the box's existing `codex` executable, deliberately leaves
+`HOME` unchanged, and sets only its child Codex process's `CODEX_HOME` to
+`/home/dev/.zai-codex-home`. That directory is
 a dedicated per-project state volume containing Z.AI's config, sessions,
 history, logs, and any other Codex state. Ordinary `codex` continues to use
 its own `CODEX_HOME`; Claude, Grok, Gemini, OpenCode, and programs launched by
