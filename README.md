@@ -90,13 +90,14 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 ### pjlsergeant/zai
 
-An isolated `zai` command that reuses the existing `codex` executable while
-giving Z.AI its own `CODEX_HOME`, config, sessions, and history. It does not
-install or modify Codex. Enable byre's built-in Codex skill alongside this one
-when the box does not otherwise have `codex` on `PATH`; only the API key is
-forwarded at runtime. It can be selected as the box agent with
-`agent = "pjlsergeant/zai"` and `skills = ["codex"]`; the built-in Codex skill
-supplies both the executable and byre's MCP/context launch adapter.
+An isolated Z.AI agent that reuses byre's built-in Codex skill while giving
+Z.AI its own `CODEX_HOME`, config, sessions, and history. Select it with
+`agent = "pjlsergeant/zai"` **and** `skills = ["codex"]`; the latter is a
+mandatory prerequisite supplying both the executable and byre's MCP/context
+launch adapter. A fresh box therefore also shows Codex's ordinary OpenAI
+device-login prompt before Z.AI starts. That login is irrelevant to `zai` and
+may be skipped with Ctrl-C; its extra state volume and OpenAI egress are an
+accepted temporary cost of reusing the full built-in Codex skill.
 
 The pinned install command will be added when this package is released.
 
@@ -104,9 +105,20 @@ The pinned install command will be added when this package is released.
 
 Optional companion for `pjlsergeant/zai`: stores one static Z.AI API key in a
 machine-scoped identity volume and exports it to every opted-in box. An
-explicit per-project `ZAI_API_KEY` takes precedence. Because `zai` is an
-auxiliary command rather than the selected primary agent, enable this package
-manually alongside `pjlsergeant/zai`.
+explicit per-project `ZAI_API_KEY` takes precedence. It declares itself as
+`pjlsergeant/zai`'s shared-auth companion, so byre offers it during onboarding
+and nests it beneath that agent in the config UI.
+
+The Z.AI Responses endpoint may report an expired or incorrect key as a JSON
+`{"code":401,...}` body, which Codex can surface misleadingly as five
+reconnect attempts followed by `stream closed before response.completed`.
+To rotate the shared key, run `rm ~/.byre-identity/zai/api-key` inside
+`byre shell`, exit that shell immediately because it still exports the old
+value, then relaunch byre and enter the replacement at the first-run prompt.
+The later environment hook loads it for the agent in that same launch. This
+rotates the machine-scoped credential for every opted-in project. An explicit
+project `ZAI_API_KEY` overrides the shared file, suppresses the prompt, and
+must instead be replaced at its source.
 
 The pinned install command will be added when this package is released.
 

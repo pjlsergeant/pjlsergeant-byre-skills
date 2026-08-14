@@ -8,8 +8,11 @@ zai_home=${ZAI_CODEX_HOME:-/home/dev/.zai-codex-home}
 zai_config_template=${ZAI_CONFIG_TEMPLATE:-/usr/local/share/byre-zai/config.toml}
 zai_models_template=${ZAI_MODELS_TEMPLATE:-/usr/local/share/byre-zai/models.json}
 
-zai_codex=${ZAI_CODEX_BIN:-}
-[ -n "$zai_codex" ] || zai_codex=$(command -v codex 2>/dev/null || true)
+zai_codex=${ZAI_CODEX_BIN:-codex}
+case $zai_codex in
+    */*) ;;
+    *) zai_codex=$(command -v "$zai_codex" 2>/dev/null || true) ;;
+esac
 if [ -z "$zai_codex" ] || [ ! -x "$zai_codex" ]; then
     echo "zai: Codex or its byre launch adapter is required but was not found" >&2
     echo "     enable byre's Codex skill in this box, then rebuild it" >&2

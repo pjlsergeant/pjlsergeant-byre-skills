@@ -51,4 +51,4 @@ chmod 0600 "$tmp_key"
 mv -f -- "$tmp_key" "$key_file"
 tmp_key=
 trap - EXIT HUP INT TERM
-echo "byre: saved. Boxes with pjlsergeant/zai-shared-auth enabled use it from their next launch."
+echo "byre: saved. This launch will use it; other running boxes pick it up when relaunched."

@@ -1,5 +1,7 @@
-# `zai` is an auxiliary command, not a primary [agent], so this intentionally
-# does not claim shared_auth_for (which would place it in agent onboarding).
+# Offer this as pjlsergeant/zai's shared-auth companion during onboarding and
+# nest it beneath that agent in byre's config UI. This must precede [package]
+# so it remains top-level TOML rather than package metadata.
+shared_auth_for = "pjlsergeant/zai"
 
 [package]
 id = "pjlsergeant/zai-shared-auth"
@@ -25,7 +27,7 @@ scope = "machine"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "bcec0516413fab500cfd06881be992c8573a4dbdd0e3eb4150a9c185372fb081"
+sha256 = "8b77139a4bad993846d869811b3f1b57e97b0cd2bc1bb207a9df8ef449ca1bdc"
 
 [[package.files]]
 src = "env.sh"
@@ -35,5 +37,5 @@ sha256 = "cbf010ac99f005082a89c3a36015be91ac1ac0e53d0411a90a3ba8037e1c1916"
 [[package.files]]
 src = "firstrun.sh"
 dest = "firstrun.sh"
-sha256 = "01e5cc56bc089769ff03ed3b76e3b5135d1684a07ab5a18c10a9bb6f31032723"
+sha256 = "aa2f67a1f36c77d79c04e5ea69520c9eb7aa2d129b62b40bf75f6e6d7e81918d"
 executable = true

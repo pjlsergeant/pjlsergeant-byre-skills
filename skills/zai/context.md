@@ -2,8 +2,8 @@
 
 `zai` launches the Codex CLI with an isolated configuration for Z.AI's GLM
 Coding Plan. Use it anywhere you would use `codex`, including `zai exec ...`.
-It requires `codex` on `PATH`; enable byre's built-in Codex skill alongside
-this package when Codex is not already part of the box.
+Byre's built-in Codex skill is mandatory for both command and agent use; it
+supplies the executable and the launch adapter, not merely a `codex` on PATH.
 
 The package is also a selectable byre agent. Use this project configuration:
 
@@ -16,6 +16,17 @@ The built-in Codex skill is an explicit prerequisite: it supplies the Codex
 executable and byre's Codex launch adapter. The adapter preserves byre's MCP
 and developer-context injection; `zai` supplies only the isolated home and
 Z.AI provider configuration.
+
+The prerequisite is byre's full Codex skill, so a fresh box also runs its
+ordinary OpenAI device-login hook before launching Z.AI. That login is not used
+by `zai`, which overrides `CODEX_HOME` for the agent process. Complete it if you
+also want ordinary Codex in the box, or press Ctrl-C to skip it. The extra
+`.codex` state volume and OpenAI egress declarations are accepted residuals of
+reusing the built-in skill until byre offers an auth-free Codex runtime layer.
+
+For a machine-wide API key shared across opted-in projects, install
+`pjlsergeant/zai-shared-auth`; byre offers it as this agent's shared-auth
+companion during onboarding.
 
 Set `ZAI_API_KEY` to the key from Z.AI's API-key page. The key is read from the
 environment for each request; it is never written into the image or Codex

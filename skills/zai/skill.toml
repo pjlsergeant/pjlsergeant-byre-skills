@@ -4,7 +4,7 @@ version = "1.0.0"
 kind = "skill"
 package_api = 1
 requires_byre = ">=1.3.0"
-description = "An isolated `zai` command that configures an existing Codex CLI for Z.AI's GLM Coding Plan without touching other agents' state."
+description = "Z.AI Codex agent (requires skills = [\"codex\"]); isolated Z.AI state, with the built-in Codex skill's OpenAI login prompt."
 
 [build]
 files = { "zai" = "/usr/local/bin/zai", "config.toml" = "/usr/local/share/byre-zai/config.toml", "models.json" = "/usr/local/share/byre-zai/models.json" }
@@ -42,7 +42,7 @@ sha256 = "86e5fff7e352842324a6af3684961e087ee42f25b877b9ae87c28d9fff5d10ae"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "9a2c6c8a438c37bb2085ec14c476d655e663efe28fd826e62bd1d3f6034578f0"
+sha256 = "f2dcabdf64c8fc8847495004c3b90f67138bccd8daf03382262687c0b2bfc045"
 
 [[package.files]]
 src = "models.json"
@@ -52,5 +52,5 @@ sha256 = "d7308cdfe65fe8472a540761b2876ec031292da33a121f257260bcaa1a5c0896"
 [[package.files]]
 src = "zai"
 dest = "zai"
-sha256 = "4fcb9aa079e7108cacd7686a0055e48ffcb7d95ee9ed0639d24a1f147f4a3be9"
+sha256 = "2a770a342e9ede932bdf71a247fd58050b1c472040aa65b2f057fecdfa038c41"
 executable = true
