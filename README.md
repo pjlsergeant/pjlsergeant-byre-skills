@@ -94,7 +94,9 @@ An isolated `zai` command that reuses the existing `codex` executable while
 giving Z.AI its own `CODEX_HOME`, config, sessions, and history. It does not
 install or modify Codex. Enable byre's built-in Codex skill alongside this one
 when the box does not otherwise have `codex` on `PATH`; only the API key is
-forwarded at runtime.
+forwarded at runtime. It can be selected as the box agent with
+`agent = "pjlsergeant/zai"` and `skills = ["codex"]`; the built-in Codex skill
+supplies both the executable and byre's MCP/context launch adapter.
 
 The pinned install command will be added when this package is released.
 

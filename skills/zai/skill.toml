@@ -3,7 +3,7 @@ id = "pjlsergeant/zai"
 version = "1.0.0"
 kind = "skill"
 package_api = 1
-requires_byre = ">=1.0.0"
+requires_byre = ">=1.3.0"
 description = "An isolated `zai` command that configures an existing Codex CLI for Z.AI's GLM Coding Plan without touching other agents' state."
 
 [build]
@@ -19,6 +19,15 @@ egress = ["api.z.ai"]
 [context]
 file = "context.md"
 
+[agent]
+# The built-in Codex skill supplies this adapter and the codex executable.
+# The adapter injects byre's canonical MCP configuration and developer context;
+# zai wraps it with the isolated Z.AI CODEX_HOME and seeded provider/catalog.
+command = "env ZAI_CODEX_BIN=/usr/local/bin/byre-codex-mcp-launch zai --dangerously-bypass-approvals-and-sandbox"
+mcp = "inject"
+context = "inject"
+state = ".zai-codex"
+
 [[volumes]]
 name = ".zai-codex"
 role = "state"
@@ -33,7 +42,7 @@ sha256 = "86e5fff7e352842324a6af3684961e087ee42f25b877b9ae87c28d9fff5d10ae"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "fa24875982d6e844993670d59d62a2b948c6aca41fb5c2f8e3f95a36110488cb"
+sha256 = "9a2c6c8a438c37bb2085ec14c476d655e663efe28fd826e62bd1d3f6034578f0"
 
 [[package.files]]
 src = "models.json"
@@ -43,5 +52,5 @@ sha256 = "d7308cdfe65fe8472a540761b2876ec031292da33a121f257260bcaa1a5c0896"
 [[package.files]]
 src = "zai"
 dest = "zai"
-sha256 = "758dfdc7339bb453f7b4a51d8e39c4e82e878b8b0c36505c72876965e5f3c208"
+sha256 = "4fcb9aa079e7108cacd7686a0055e48ffcb7d95ee9ed0639d24a1f147f4a3be9"
 executable = true

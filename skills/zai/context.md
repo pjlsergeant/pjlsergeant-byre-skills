@@ -5,6 +5,18 @@ Coding Plan. Use it anywhere you would use `codex`, including `zai exec ...`.
 It requires `codex` on `PATH`; enable byre's built-in Codex skill alongside
 this package when Codex is not already part of the box.
 
+The package is also a selectable byre agent. Use this project configuration:
+
+```toml
+agent = "pjlsergeant/zai"
+skills = ["codex"]
+```
+
+The built-in Codex skill is an explicit prerequisite: it supplies the Codex
+executable and byre's Codex launch adapter. The adapter preserves byre's MCP
+and developer-context injection; `zai` supplies only the isolated home and
+Z.AI provider configuration.
+
 Set `ZAI_API_KEY` to the key from Z.AI's API-key page. The key is read from the
 environment for each request; it is never written into the image or Codex
 configuration. In `byre.config`, the usual host-forwarding form is:
