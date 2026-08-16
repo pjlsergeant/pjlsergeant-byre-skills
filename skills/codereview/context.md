@@ -105,6 +105,14 @@ point codex at zai's `CODEX_HOME`. The review log names the reviewer, and a
 `codex` entry that actually ran GLM is a forged audit trail — worse than a
 failed review, because nobody can see what they didn't get.
 
+The subtle version of that forgery needs no alias at all: a zai box exports
+`CODEX_HOME` pointing at zai's home for the whole session, so plain `codex`
+inherits Z.AI's config and silently answers as GLM (observed: a `--reviewer
+codex` run self-identified as "GLM-4.5, trained by Z.ai" while the log said
+codex). The script now strips an inherited zai `CODEX_HOME` before running the
+codex reviewer, so codex means codex: a genuine codex review when its own home
+is logged in, an honest auth failure naming the choice when it is not.
+
 Choose deliberately:
 
 - **Independent opinion** — complete `codex-login` (device flow, user-run in

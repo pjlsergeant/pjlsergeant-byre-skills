@@ -161,6 +161,26 @@ if [ "$HARNESS" = zai ]; then
   fi
 fi
 
+# codex pre-flight, the mirror image of zai's: a zai-agent box exports
+# CODEX_HOME pointing at zai's isolated home for the whole session, so plain
+# `codex` — including the DEFAULT reviewer — silently runs Z.AI's GLM while
+# the Running line and reviews.md say "codex". No alias required; inheritance
+# does the forgery (verified in-box 2026-08-16: --reviewer codex answered
+# "GLM-4.5, trained by Z.ai"). Strip the inherited zai home so codex uses its
+# OWN home: a real codex review if that home is logged in, an honest auth
+# failure (with the zai hint below) if it is not. A CODEX_HOME pointing
+# anywhere else is a deliberate user choice and is left alone.
+if [ "$HARNESS" = codex ]; then
+  zai_home="${ZAI_CODEX_HOME:-/home/dev/.zai-codex-home}"
+  if [ "${CODEX_HOME:-}" = "$zai_home" ]; then
+    unset CODEX_HOME
+    echo "byre-codereview: note — stripped the inherited zai CODEX_HOME ($zai_home)" >&2
+    echo "  so the codex reviewer uses codex's own home. Without this it would silently" >&2
+    echo "  review as Z.AI's GLM while the log named it codex. Want GLM? Say so:" >&2
+    echo "  byre-codereview --reviewer zai" >&2
+  fi
+fi
+
 # Persisted artifacts live in .byre-devlog/ at the repo root — a self-ignoring
 # dir (its own .gitignore is "*"), so the review log and agent diary persist via
 # the workspace mount but never land in git and need no per-project .gitignore

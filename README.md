@@ -32,7 +32,7 @@ Reviewers: codex (default), grok, claude, opencode, and zai (Z.AI/GLM, always
 under its own name -- never a silent codex fallback).
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.8/skills/codereview/skill.toml --digest sha256:d5f100e14e76eaca5ae5042421d67d295ac8c351016b7b973a0cc9acafaeaa88
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.8/skills/codereview/skill.toml --digest sha256:12e6c1904611ae8e46bb710491bc4630cdbd39ede1f1049d5d72a422a59e88f3
 ```
 
 ### pjlsergeant/toolbox
