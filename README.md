@@ -28,9 +28,11 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 ### pjlsergeant/codereview
 
 byre-codereview -- the independent second-opinion review loop.
+Reviewers: codex (default), grok, claude, opencode, and zai (Z.AI/GLM, always
+under its own name -- never a silent codex fallback).
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.6/skills/codereview/skill.toml --digest sha256:0a703568603a2b9af0884366ffb10255ff39312d461dda58842a347ed96548fe
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.8/skills/codereview/skill.toml --digest sha256:d5f100e14e76eaca5ae5042421d67d295ac8c351016b7b973a0cc9acafaeaa88
 ```
 
 ### pjlsergeant/toolbox

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # byre-codereview — an independent second-opinion review of the current changes.
 # Shipped by the codereview skill; pairs with a reviewer skill that installs the
-# reviewer binary: codex (the default), grok, claude, and/or opencode. Reviews
-# the working tree's git changes and prints findings, and appends them to
-# .byre-devlog/reviews.md.
+# reviewer binary: codex (the default), grok, claude, opencode, and/or zai.
+# Reviews the working tree's git changes and prints findings, and appends them
+# to .byre-devlog/reviews.md.
 #
 #   byre-codereview                        # review current changes (codex)
 #   byre-codereview "focus area"           # focus the review
@@ -14,6 +14,11 @@
 # BYRE_REVIEWER sets the default reviewer (codex when unset). A reviewer is
 # "harness" or "harness:model" — see the parsing below; only opencode consumes
 # a model today.
+#
+# zai is the Z.AI (GLM) Codex wrapper: a reviewer under its OWN name, never a
+# silent fallback for codex. The Running line and reviews.md must say who
+# actually reviewed, and in a zai-authored box a zai review is a same-family
+# second pass, not an independent opinion.
 #
 # --raw replaces the built-in review prompt entirely: the arguments become the
 # whole prompt (required). The mechanics stay — reviewer enforcement flags,
@@ -38,9 +43,10 @@ Usage:
   byre-codereview                        review current changes
   byre-codereview "focus area"           review current changes, focused on a topic
   byre-codereview --continue "..."       re-check after fixes (resumes prior session)
-  byre-codereview --reviewer <name> ...  choose the reviewer: codex (default) | grok | claude | opencode
+  byre-codereview --reviewer <name> ...  choose the reviewer: codex (default) | grok | claude | opencode | zai
                                          opencode also takes a model as opencode:<provider/model>
                                          (e.g. opencode:openrouter/~openai/gpt-latest)
+                                         zai reviews through the isolated Z.AI Codex home (GLM)
   byre-codereview --raw "prompt"         send YOUR prompt verbatim (skips the
                                          built-in review prompt; mechanics stay)
   byre-codereview --raw -- "--anything"  -- ends option parsing, so option-shaped
@@ -79,7 +85,7 @@ for arg in "$@"; do
   esac
 done
 if [ "$expect_reviewer" = true ]; then
-  echo "byre-codereview: --reviewer needs a value (codex | grok | claude | opencode)." >&2
+  echo "byre-codereview: --reviewer needs a value (codex | grok | claude | opencode | zai)." >&2
   exit 2
 fi
 if [ "$RAW" = true ] && [ "${#FOCUS[@]}" -eq 0 ]; then
@@ -107,9 +113,9 @@ case "$REVIEWER" in
 esac
 
 case "$HARNESS" in
-  codex|grok|claude|opencode) ;;
+  codex|grok|claude|opencode|zai) ;;
   *)
-    echo "byre-codereview: unsupported reviewer '$HARNESS' (codex | grok | claude | opencode)." >&2
+    echo "byre-codereview: unsupported reviewer '$HARNESS' (codex | grok | claude | opencode | zai)." >&2
     exit 2
     ;;
 esac
@@ -117,7 +123,7 @@ esac
 if ! command -v "$HARNESS" >/dev/null 2>&1; then
   echo "byre-codereview: $HARNESS not found on PATH." >&2
   echo "  Add the $HARNESS skill (skills = [\"$HARNESS\", \"codereview\"]) and rebuild." >&2
-  for other in codex grok claude opencode; do
+  for other in codex grok claude opencode zai; do
     [ "$other" = "$HARNESS" ] && continue
     if command -v "$other" >/dev/null 2>&1; then
       echo "  ($other is available: byre-codereview --reviewer $other)" >&2
@@ -132,6 +138,27 @@ if [ -n "$MODEL" ] && [ "$HARNESS" != opencode ]; then
   echo "byre-codereview: model selection is only wired up for opencode — '$HARNESS' would silently ignore '$MODEL'." >&2
   echo "  Run '--reviewer $HARNESS' plain, or extend the $HARNESS runner to consume a model." >&2
   exit 2
+fi
+
+# zai pre-flight. Two cheap checks BEFORE a run that would otherwise burn
+# minutes failing:
+# - ZAI_CODEX_BIN points zai at byre's Codex launch adapter, which injects the
+#   AUTHORING agent's MCP config and developer context. A reviewer must start
+#   unprimed — the review prompt only — so the review path always drops back to
+#   the plain codex binary. (The isolation stays: zai still wraps it in the
+#   Z.AI CODEX_HOME.)
+# - ZAI_API_KEY is zai's only credential (env, never config). Without it Z.AI
+#   401s, which Codex surfaces as five reconnect attempts and a misleading
+#   "stream closed" — better refused here than diagnosed after the fact.
+if [ "$HARNESS" = zai ]; then
+  unset ZAI_CODEX_BIN
+  if [ -z "${ZAI_API_KEY:-}" ]; then
+    echo "byre-codereview: zai needs ZAI_API_KEY in the environment, and it is not set." >&2
+    echo "  byre's zai skill reads the key from the environment only (never from config)." >&2
+    echo "  Forward it from the host (env_from_host), or install/repair" >&2
+    echo "  pjlsergeant/zai-shared-auth, which asks once and exports it every launch." >&2
+    exit 1
+  fi
 fi
 
 # Persisted artifacts live in .byre-devlog/ at the repo root — a self-ignoring
@@ -152,8 +179,13 @@ LOG_FILE="$REVIEW_DIR/reviews.md"
 # Sessions are per-reviewer: resuming a codex thread with grok (or vice versa)
 # is meaningless. The codex file keeps its historical name so a box upgraded
 # mid-loop can still --continue.
+# zai gets its own file for a sharper reason: its ids are the SAME shape as
+# codex's (it is the same CLI) but its threads live in a different CODEX_HOME
+# and a different provider. Sharing codex's file would make --continue resume
+# another provider's thread by accident — the ids validate, so nothing would
+# catch it. zai must be chosen by name, and its sessions kept apart.
 # Keyed by harness, not by model: a --continue with a different model resumes
-# the same thread (all four CLIs apply the model per-prompt, not per-session).
+# the same thread (every CLI here applies the model per-prompt, not per-session).
 # That crossing is legitimate — handing a thread to a stronger model is a real
 # move — but it must be VISIBLE, so opencode's file carries the reviewer
 # string on a second line and the resume path warns when it differs (surfaced
@@ -163,6 +195,7 @@ case "$HARNESS" in
   grok)     SESSION_FILE="$REVIEW_DIR/.review-session-grok" ;;
   claude)   SESSION_FILE="$REVIEW_DIR/.review-session-claude" ;;
   opencode) SESSION_FILE="$REVIEW_DIR/.review-session-opencode" ;;
+  zai)      SESSION_FILE="$REVIEW_DIR/.review-session-zai" ;;
 esac
 
 # RUN_NOTE annotates the "Running..." line: raw mode says so instead of echoing
@@ -199,6 +232,9 @@ and say what would verify it.
 
 Process:
 1. Read any project guidance you can find (CLAUDE.md / AGENTS.md / README) for context.
+   NEVER read `.byre-devlog/` — review logs, session/debug files, the diary.
+   Those are audit artifacts ABOUT reviews, not project source: a fresh reviewer
+   that reads an earlier review primes itself exactly as `--continue` would.
 2. Run: git status, git diff, git diff --cached, git log --oneline -8.
 3. Review the changes (committed-but-recent and uncommitted).
 
@@ -314,15 +350,22 @@ record_review() {
 }
 
 extract_codex_session() {
+  # zai emits the same events (same CLI, different CODEX_HOME/provider), so
+  # this serves both harnesses.
   grep -m1 '"type":"thread.started"' "$DBG" 2>/dev/null \
     | jq -r '.thread_id' 2>/dev/null || true
 }
 
-run_fresh_codex() {
+# The codex FAMILY engine: codex and zai are the same CLI surface, so both
+# harnesses ride these functions and differ only in the command ($HARNESS),
+# the session file, and the failure reporter. The one thing this must NEVER do
+# is substitute one for the other — "codex" means OpenAI-login codex, "zai"
+# means the Z.AI home, and reviews.md names whichever you picked.
+run_fresh_codex_family() {
   # Starting fresh: drop any prior session up front, so an interrupted run can't
   # leave a stale session that a later --continue would wrongly resume.
   rm -f "$SESSION_FILE"
-  echo "Running code review (codex)${RUN_NOTE} — this may take several minutes..."
+  echo "Running code review (${HARNESS})${RUN_NOTE} — this may take several minutes..."
   # --sandbox danger-full-access: the BOX is the wall, not codex's own sandbox.
   # Codex sandboxes Linux commands with bundled bwrap, which must create a user
   # namespace — and container runtimes routinely deny that (docker-default
@@ -330,16 +373,16 @@ run_fresh_codex() {
   # on). Under --sandbox read-only every probe then dies BEFORE execution and
   # the review returns "no findings" with zero coverage — which reads as a
   # clean bill, worse than no review (verified in-box 2026-07-19, codex
-  # 0.144.6, Ubuntu 24.04 host). So codex joins grok's posture below — honest
-  # enforcement ordering: the box boundary and the tree tripwire are what
-  # actually hold; read-only is asked of the reviewer by the prompt, not the
-  # OS. Cost stated plainly: a prompt-injection in the code under review can
-  # now act through writes — same accepted exposure as grok, and what the
-  # tripwire exists to catch.
+  # 0.144.6, Ubuntu 24.04 host). zai runs the same binary and so inherits the
+  # same posture: honest enforcement ordering, where the box boundary and the
+  # tree tripwire actually hold; read-only is asked of the reviewer by the
+  # prompt, not the OS. Cost stated plainly: a prompt-injection in the code
+  # under review can now act through writes — same accepted exposure as grok,
+  # and what the tripwire exists to catch.
   # --skip-git-repo-check: codex refuses non-git dirs by default, but half of
   # what byre boxes isn't a repo, and the BOX is the trust boundary here — the
   # check duplicates an enclosure byre already provides (footgun doctrine).
-  if codex exec --skip-git-repo-check --json --sandbox danger-full-access "$PROMPT" \
+  if "$HARNESS" exec --skip-git-repo-check --json --sandbox danger-full-access "$PROMPT" \
        --output-last-message "$OUT" < /dev/null > "$DBG" 2>&1; then
     # Same empty-output guard as grok and claude: exit 0 with nothing extracted
     # would otherwise print nothing, record nothing, and exit 0 — a silent
@@ -349,18 +392,21 @@ run_fresh_codex() {
     # want no final text, so the guard applies only to built-in reviews, which
     # must return a report.
     if [ "$RAW" != true ] && [ ! -s "$OUT" ]; then
-      echo "byre-codereview: codex exited 0 but produced no final message." >&2
-      report_failure_codex
+      echo "byre-codereview: $HARNESS exited 0 but produced no final message." >&2
+      "report_failure_$HARNESS"
       rm -f "$OUT" "$SESSION_FILE"; exit 1
     fi
     sid=$(extract_codex_session)
     [ -n "$sid" ] && [ "$sid" != "null" ] && echo "$sid" > "$SESSION_FILE" || rm -f "$SESSION_FILE"
     cat "$OUT"; record_review; cleanup
   else
-    report_failure_codex
+    "report_failure_$HARNESS"
     rm -f "$OUT" "$SESSION_FILE"; exit 1
   fi
 }
+
+run_fresh_codex() { run_fresh_codex_family; }
+run_fresh_zai()   { run_fresh_codex_family; }
 
 # report_failure_codex inspects the debug log and prints an actionable message.
 # The common, opaque failure is an expired/invalidated codex credential: codex
@@ -369,27 +415,101 @@ run_fresh_codex() {
 # rotating token, so this WILL recur — name the fix instead of making the next
 # person cat a log.
 report_failure_codex() {
-  if grep -qiE 'token_expired|refresh token|sign in again|authentication token is expired|401 unauthorized' "$DBG" 2>/dev/null; then
+  # Same scoped classifier as zai (codex_family_error_events, defined below):
+  # the raw JSONL stream embeds reviewer command output, and a review that
+  # quotes "token_expired" — any review of auth code — must not turn an
+  # unrelated failure into re-login advice.
+  local errs; errs=$(codex_family_error_events)
+  if printf '%s' "$errs" | grep -qiE 'token_expired|refresh token|sign in again|authentication token is expired|401 unauthorized'; then
     echo "byre-codereview: codex authentication failed — the login expired or was invalidated." >&2
     echo "  Re-authenticate in another terminal: run 'byre shell', then:" >&2
     echo "      codex-login                  # this package's wrapper, or:" >&2
     echo "      codex login --device-auth    # the same thing, always available" >&2
     echo "  (Plain 'codex login' opens a browser flow the box can't complete.)" >&2
+    if command -v zai >/dev/null 2>&1; then
+      echo "  This box also carries zai, and if its agent is zai you may have skipped" >&2
+      echo "  this login deliberately. 'byre-codereview --reviewer zai' then works on" >&2
+      echo "  ZAI_API_KEY alone — but zai is GLM: in a zai-authored box that is a" >&2
+      echo "  same-family second pass, not an independent opinion. Complete" >&2
+      echo "  codex-login (or use grok/claude/opencode) when independence matters." >&2
+    fi
     echo "  Debug log: $DBG" >&2
   else
     echo "byre-codereview: review failed. Debug log: $DBG" >&2
   fi
 }
 
-run_resume_codex() {
+# zai failure advice. Known shape (observed in-box, Z.AI Responses): an expired
+# or incorrect key returns {"code":401,"msg":"token expired or incorrect"}, which
+# Codex surfaces misleadingly as five missing-response.completed reconnects and
+# then "stream closed before response.completed". Name it, and name the fix —
+# there is NO zai login command to run: the key is environmental.
+#
+# codex_family_error_events is the scoped classifier for BOTH codex-family
+# reporters (same CLI, same event schema). It reads CLI/provider-owned TEXT
+# channels, never the whole debug
+# log: error/turn.failed fields, error-shaped msg objects, and standalone
+# provider body lines (which carry no top-level type). Codex's
+# --json stream embeds reviewer command output (item.completed events carry git
+# diffs and file reads), and this very script contains every auth word below.
+# Grepping all of $DBG would diagnose an expired key — and recommend rotating
+# the machine-wide shared key — after any unrelated failure in a review that
+# happened to quote "401" or "api key" (found by the first zai review of this
+# very wiring, 2026-08-16). A missed match here costs a vaguer message; a false
+# match costs a credential rotation across every opted-in project. turn.failed
+# is Codex's terminal failure event, carrying error.message per 0.147's
+# exec_events.rs, and is where the Z.AI stream-closed shape arrives; the
+# standalone body {"code":401,"msg":"token expired or incorrect"} has no
+# top-level type, hence the string-msg channel. Every branch COERCES to a
+# string before join: join on an object aborts jq (exit 5, empty output),
+# which would silently drop a diagnosis the same log supported.
+# NOTE: keep prose comments OUT of the jq program: it rides a single-quoted
+# shell string, and an apostrophe inside a comment would end that string.
+codex_family_error_events() {
+  jq -rRs '
+    [ split("\n")[] | fromjson? ]
+    | [ .[]
+        | ( ( if .type == "turn.failed" then (.error.message // "")
+              else (.message // .error.message // "") end )
+            | if type == "string" then . else "" end ) as $owned
+        | ( if (.msg | type) == "string" then .msg
+            elif (.msg | type) == "object" and .msg.type? == "error"
+            then (.msg.message // .msg.content // "")
+            else "" end
+          | if type == "string" then . else "" end ) as $msg
+        | select($owned != "" or $msg != "")
+        | [$owned, $msg] | join("\n") ]
+    | join("\n")
+  ' "$DBG" 2>/dev/null || true
+}
+
+report_failure_zai() {
+  local errs; errs=$(codex_family_error_events)
+  if printf '%s' "$errs" | grep -qiE '"code"[[:space:]]*:[[:space:]]*401|token expired or incorrect|stream closed before response\.completed|unauthorized|invalid api key|api key|401'; then
+    echo "byre-codereview: Z.AI may have rejected the request — an expired or" >&2
+    echo "  incorrect ZAI_API_KEY is the common cause. The reconnect-then-stream-" >&2
+    echo "  closed shape is how that 401 usually surfaces in Codex; a plain network" >&2
+    echo "  fault can look similar, so the debug log below is the tiebreaker. A" >&2
+    echo "  project-sourced ZAI_API_KEY wins, so replace that at its source. With" >&2
+    echo "  zai-shared-auth, rotate the machine key: run 'byre shell', then:" >&2
+    echo "      rm ~/.byre-identity/zai/api-key" >&2
+    echo "  exit that shell IMMEDIATELY (it still exports the old key), and relaunch" >&2
+    echo "  byre — the first-run prompt asks for the replacement." >&2
+    echo "  Debug log: $DBG" >&2
+  else
+    echo "byre-codereview: review failed. Debug log: $DBG" >&2
+  fi
+}
+
+run_resume_codex_family() {
   local sid="$1"
-  echo "Continuing previous review session (codex) — this may take several minutes..."
+  echo "Continuing previous review session (${HARNESS}) — this may take several minutes..."
   # The resume subcommand rejects --sandbox ("unexpected argument", clap exit 2
   # — every resume then fell back to a fresh review, silently), but it takes -c
   # overrides, and sandbox_mode is the same knob by its config name (value
   # matches the fresh path's --sandbox; see the rationale there). It DOES
   # accept --output-last-message, so the fresh path's extraction works here too.
-  if codex exec resume --skip-git-repo-check --json -c sandbox_mode="danger-full-access" \
+  if "$HARNESS" exec resume --skip-git-repo-check --json -c sandbox_mode="danger-full-access" \
        "$sid" "$PROMPT" --output-last-message "$OUT" < /dev/null > "$DBG" 2>&1; then
     new=$(extract_codex_session); [ -n "$new" ] && [ "$new" != "null" ] && echo "$new" > "$SESSION_FILE"
     # No extractable message: keep $DBG — cleanup would delete the very file
@@ -400,9 +520,12 @@ run_resume_codex() {
     fi
   else
     echo "Resume failed — falling back to a fresh review." >&2
-    rm -f "$SESSION_FILE"; run_fresh_codex
+    rm -f "$SESSION_FILE"; run_fresh_codex_family
   fi
 }
+
+run_resume_codex() { run_resume_codex_family "$@"; }
+run_resume_zai()   { run_resume_codex_family "$@"; }
 
 # Grok reviewer notes. Honest enforcement ordering: the box boundary and the
 # tripwire are what actually hold; the tool strip is best-effort narrowing.
@@ -789,7 +912,7 @@ report_failure_grok() {
   fi
 }
 
-# Session-id validation is per-CLI. codex/grok/claude ids are UUIDs, case-
+# Session-id validation is per-CLI. codex/zai/grok/claude ids are UUIDs, case-
 # folded here because historical session files vary in case. opencode ids are
 # ses_ + 12 hex + 14 base62 chars and case-SENSITIVE — folding one would
 # corrupt it, so that branch must never share the tr.
