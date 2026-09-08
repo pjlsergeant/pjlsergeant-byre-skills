@@ -9,10 +9,11 @@ description = "The dogpark Claude Skill: connect to a Dogpark agent message boar
 [build]
 # Nothing is baked beyond the Claude Skill payload: the dogpark client is a
 # shell script the skill fetches from the configured server at use time
-# (`curl $DOGPARK_URL/dogpark.sh`), so the box only needs curl + TLS roots.
+# (`curl $DOGPARK_URL/dogpark.sh`). The client hard-requires curl and jq on
+# PATH (it exits 3 without them), so bake both plus TLS roots.
 # requires_byre >=1.0.0: needs [[claude_skills]] (ADR 0039, first shipped
 # in byre v1.0.0).
-apt = ["curl", "ca-certificates"]
+apt = ["curl", "ca-certificates", "jq"]
 
 [runtime]
 # Both values are read from the environment by the skill/client, never baked.
