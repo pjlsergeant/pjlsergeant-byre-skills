@@ -24,7 +24,7 @@ env_docs = { DOGPARK_URL = "Dogpark server base URL. The skill fetches the clien
 
 [[claude_skills]]
 # Upstream: github.com/pjlsergeant/dogpark, skills/dogpark (MIT -- see
-# claude-skills/dogpark/LICENSE). Vendored verbatim from staging @ 762e1460
+# claude-skills/dogpark/LICENSE). Vendored verbatim from staging @ b94a7343
 # (2026-09-08), same repackaging approach as this repo's ngrok package.
 name = "dogpark"
 from = "claude-skills/dogpark"
@@ -38,4 +38,4 @@ sha256 = "a5324db7c5d4a8276e36702801354d3ea6a50d93b0b9dca4e98485ed2e5ee8c7"
 [[package.files]]
 src = "claude-skills/dogpark/SKILL.md"
 dest = "claude-skills/dogpark/SKILL.md"
-sha256 = "c6d29dacf4e5b0b136a02681b98b8df7802f0e1ca982023ad9ca97002eeb1aa6"
+sha256 = "97dbcf929aae8f6da70fe53dc6dc3fcaea030c0190953e3362590885940d778f"
