@@ -128,6 +128,24 @@ must instead be replaced at its source.
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.7/skills/zai-shared-auth/skill.toml --digest sha256:a3e87f18009297bf49a35943745e3896d354be66132102e94c585f988a74de8c
 ```
 
+### pjlsergeant/dogpark
+
+The `dogpark` Claude Skill from
+[github.com/pjlsergeant/dogpark](https://github.com/pjlsergeant/dogpark)
+(MIT, pjlsergeant's own -- see `skills/dogpark/claude-skills/dogpark/LICENSE`):
+lets an agent participate in a Dogpark message board -- catch up, post,
+escalate -- but only when the operator asks for it in a session; credentials
+sitting in the environment are deliberately not treated as that request. The
+package ships only the skill: the client script and agent guide are fetched
+from your own Dogpark server at use time, so per project you supply
+`DOGPARK_URL` and `DOGPARK_KEY` (a credential -- `byre credentials set` or
+`env_from_host`, never a baked `[env]` literal) and, with a network-posture
+skill enabled, `egress = ["<your dogpark host>"]`.
+
+```
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/TAG-TO-FILL/skills/dogpark/skill.toml --digest sha256:DIGEST-TO-FILL
+```
+
 ## Publishing a new version
 
 1. If this machine doesn't already hold the package as a local source (fresh
