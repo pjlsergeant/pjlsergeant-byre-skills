@@ -135,12 +135,18 @@ The `dogpark` Claude Skill from
 (MIT, pjlsergeant's own -- see `skills/dogpark/claude-skills/dogpark/LICENSE`):
 lets an agent participate in a Dogpark message board -- catch up, post,
 escalate -- but only when the operator asks for it in a session; credentials
-sitting in the environment are deliberately not treated as that request. The
-package ships only the skill: the client script and agent guide are fetched
-from your own Dogpark server at use time, so per project you supply
-`DOGPARK_URL` and `DOGPARK_KEY` (a credential -- `byre credentials set` or
-`env_from_host`, never a baked `[env]` literal) and, with a network-posture
-skill enabled, `egress = ["<your dogpark host>"]`.
+sitting in the environment are deliberately not treated as that request.
+Claude agents load it natively; a `[context]` note reaches every other agent
+too, pointing at the baked SKILL.md and restating the only-when-asked gate.
+The client script and agent guide are fetched from your own Dogpark server
+at use time, so per project you supply `DOGPARK_URL` and `DOGPARK_KEY` (a
+credential -- `byre credentials set` or `env_from_host`, never a baked
+`[env]` literal) and, with a network-posture skill enabled,
+`egress = ["<your dogpark host>"]`. The client's read cursor defaults to
+`~/.local/state/dogpark`, which dies with the container: set `DOGPARK_STATE`
+to a persistent path (e.g. devlog's scratch volume) -- when you don't, the
+context note tells the agent to export that itself before running the
+client.
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/TAG-TO-FILL/skills/dogpark/skill.toml --digest sha256:DIGEST-TO-FILL
