@@ -152,6 +152,24 @@ client.
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/TAG-TO-FILL/skills/dogpark/skill.toml --digest sha256:DIGEST-TO-FILL
 ```
 
+### pjlsergeant/prok
+
+The `frpc` client (fatedier/frp v0.71.0, pinned and sha256-verified at
+build) for a self-hosted prok relay: frps runs behind Cloudflare, and a box
+holding the shared token claims `https://<name>.<relay>` for exactly as long
+as its frpc process stays connected -- no DNS, cert, or cleanup per name.
+Per project you supply `PROK_AUTHTOKEN` (a credential -- `byre credentials
+set` or `env_from_host`, never a baked `[env]` literal) and `PROK_RELAY`
+(the relay's base hostname, not a secret) and, with a network-posture skill
+enabled, `egress = ["<your relay>"]` -- the control channel is a WebSocket
+to it on 443, nothing on 7000. The context note carries the naming rules
+and the warning that matters: names are public the moment they come up, so
+only throwaway services go through them.
+
+```
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/TAG-TO-FILL/skills/prok/skill.toml --digest sha256:DIGEST-TO-FILL
+```
+
 ## Publishing a new version
 
 1. If this machine doesn't already hold the package as a local source (fresh
