@@ -24,12 +24,16 @@ the project config and relaunch; there is no interactive login flow.
 - `-n` must be unique across all clients of the relay; always pass the same
   value as `--sd`. A `--sd` already claimed by another client fails with
   `start error: router config conflict`; reusing another client's `-n`
-  fails with `start error: proxy [<name>] already exists`. Either way: pick
-  another name.
+  fails with `start error: proxy [<name>] already exists`. Either way: KILL
+  the failed process, then pick another name. Killing it first matters —
+  frpc retries the registration every ~30s, so a lingering conflicted
+  process silently grabs the name (and exposes your local port under it)
+  the moment its current owner disconnects.
 - A conflict does NOT kill the process — frpc logs the error as a `[W]`
   warning and stays connected with the name dead. The only success signal
-  is the `start proxy success` log line: check the log for it (or curl the
-  URL) before handing the URL to anyone.
+  is the `start proxy success` line in YOUR process's log: check for it
+  before handing the URL to anyone. A successful curl of the URL proves
+  nothing during a collision — the name's current owner answers, not you.
 - Names are PUBLIC the moment the proxy starts — scanners find new
   hostnames within minutes. Only expose throwaway, sacrificial services:
   nothing holding credentials, private data, or state you can't afford to
