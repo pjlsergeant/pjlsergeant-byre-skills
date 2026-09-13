@@ -39,7 +39,7 @@ dockerfile = [
 # (PROK_RELAY), so the project config must open the door itself -- same
 # arrangement as dogpark's DOGPARK_URL. Documented per-var below so the
 # config editor's env screen surfaces it.
-env_docs.PROK_AUTHTOKEN = "prok shared secret, required. A credential: prefer `byre credentials set PROK_AUTHTOKEN` (encrypted in the project config) or env_from_host over an [env] literal, which is baked into the image. Referenced from frpc's config via its {{ .Envs }} templating, so it is resolved from the environment at connect time and never written to disk."
+env_docs.PROK_AUTHTOKEN = "prok shared secret, required. A credential: prefer `byre credentials set PROK_AUTHTOKEN` (encrypted in the project config) or env_from_host over an [env] literal, which is baked into the image. Referenced from frpc's config via its {{ .Envs }} templating, so it is resolved from the environment at connect time and never written to disk. Mint it from letters, digits, - and _ only: frpc splices env values into the config as raw text before TOML parsing, so a quote or newline inside the token breaks the config."
 env_docs.PROK_RELAY = "prok relay base hostname, required (tunnels come up at https://<name>.<this host>). Not a secret -- env_from_host or a literal [env] value both fine. With a network-posture skill enabled the project config must also open the door: egress = [\"<this host>\"] -- the control channel is a WebSocket to it on 443 (nothing on 7000); add <name>.<this host> too if the box should curl its own tunnels."
 
 [context]
@@ -49,4 +49,4 @@ file = "context.md"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "4ee21dbce2928d985cc82263f5059849de609cde1198f5dd6770317886c32bd7"
+sha256 = "ca49881bef9bd775b9c2efb752ff426d50f732b9ca3117f38becd64e59159b4f"

@@ -14,11 +14,11 @@ does:
 
 ```sh
 cat > /tmp/frpc-<name>.toml <<'EOF'
-serverAddr = "{{ .Envs.PROK_RELAY }}"
+serverAddr = '{{ .Envs.PROK_RELAY }}'
 serverPort = 443
 transport.protocol = "wss"
 transport.tls.trustedCaFile = "/etc/ssl/certs/ca-certificates.crt"
-auth.token = "{{ .Envs.PROK_AUTHTOKEN }}"
+auth.token = '{{ .Envs.PROK_AUTHTOKEN }}'
 
 [[proxies]]
 name = "<name>"
