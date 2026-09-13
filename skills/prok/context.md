@@ -1,52 +1,60 @@
 # prok (byre skill)
 
-`frpc` (frp v0.71.0) is installed and on `PATH`. prok is a self-hosted
-ngrok: an frps relay runs behind Cloudflare, and a client holding the
-shared token can claim `https://<name>.$PROK_RELAY` for exactly as long as
-its frpc process stays connected. No DNS, cert, or cleanup per name.
+`frpc` (frp v0.71.0) is on `PATH`. prok is a self-hosted ngrok: an frps
+relay behind Cloudflare. A client holding the shared token claims
+`https://<name>.$PROK_RELAY` for exactly as long as its frpc process stays
+connected — no DNS, cert, or cleanup per name. `PROK_AUTHTOKEN` and
+`PROK_RELAY` are required in the environment; if either is missing, tell
+the user to set it in the project config and relaunch.
 
-## The whole command
+## Running a tunnel
+
+Write a config, run it in the foreground; the name lives while the process
+does:
 
 ```sh
-frpc http -s "$PROK_RELAY" -P 443 -p wss -t "$PROK_AUTHTOKEN" \
-     -n <name> --sd <name> -l <port>
+cat > /tmp/frpc-<name>.toml <<'EOF'
+serverAddr = "{{ .Envs.PROK_RELAY }}"
+serverPort = 443
+transport.protocol = "wss"
+transport.tls.trustedCaFile = "/etc/ssl/certs/ca-certificates.crt"
+auth.token = "{{ .Envs.PROK_AUTHTOKEN }}"
+
+[[proxies]]
+name = "<name>"
+type = "http"
+subdomain = "<name>"
+localPort = <port>
+EOF
+frpc -c /tmp/frpc-<name>.toml
 ```
 
-It runs in the foreground; the name lives while the process does. Both env
-vars are required (`PROK_AUTHTOKEN` is the shared secret, `PROK_RELAY` the
-relay's base hostname) — if either is missing, tell the user to set it in
-the project config and relaunch; there is no interactive login flow.
+The `{{ .Envs... }}` templates are expanded by frpc itself, so the token
+never lands in the file. Always use this form — the bare `frpc http ...`
+one-liner cannot set `trustedCaFile`, and without it frpc skips
+certificate verification entirely, letting anyone on the network path
+impersonate the relay and capture the token.
 
 ## Rules
 
-- `<name>` is ONE lowercase DNS label, no dots; it becomes
-  `https://<name>.$PROK_RELAY`.
-- `-n` must be unique across all clients of the relay; always pass the same
-  value as `--sd`. A `--sd` already claimed by another client fails with
-  `start error: router config conflict`; reusing another client's `-n`
-  fails with `start error: proxy [<name>] already exists`. Either way: KILL
-  the failed process, then pick another name. Killing it first matters —
-  frpc retries the registration every ~30s, so a lingering conflicted
-  process silently grabs the name (and exposes your local port under it)
-  the moment its current owner disconnects.
-- A conflict does NOT kill the process — frpc logs the error as a `[W]`
-  warning and stays connected with the name dead. The only success signal
-  is the `start proxy success` line in YOUR process's log: check for it
-  before handing the URL to anyone. A successful curl of the URL proves
-  nothing during a collision — the name's current owner answers, not you.
-- Names are PUBLIC the moment the proxy starts — scanners find new
-  hostnames within minutes. Only expose throwaway, sacrificial services:
-  nothing holding credentials, private data, or state you can't afford to
-  lose.
-- HTTP only (websockets fine); raw TCP/UDP is not available.
-- Kill the frpc process to take the name down; it is released for reuse
-  immediately.
+- `<name>` is ONE lowercase DNS label, no dots; use the same value for
+  `name` and `subdomain`.
+- A taken name fails with `start error: router config conflict` (the
+  subdomain) or `proxy [...] already exists` (the proxy name) — as a `[W]`
+  log line, not an exit. frpc stays up and retries every ~30s, and would
+  silently grab the name (exposing your port under it) the moment its
+  owner disconnects: kill the process, then retry with a different name.
+- The only success signal is `start proxy success` in YOUR process's log.
+  A successful curl proves nothing during a collision — the current owner
+  answers, not you.
+- Names are PUBLIC the moment the proxy starts; scanners find them within
+  minutes. Only expose throwaway, sacrificial services.
+- HTTP only (websockets fine); no raw TCP/UDP.
+- Kill the process to release the name; it is reusable immediately.
 
 ## Network
 
-The control channel is a WebSocket to `$PROK_RELAY` on 443 — nothing on
-7000. The relay hostname is deployment-specific, so this skill cannot
-declare the egress itself: with a network-posture skill enabled, the
-project config must open the door (`egress = ["<relay>"]`, and
-`<name>.<relay>` too if you want to curl your own tunnel from inside the
-box).
+Egress is `$PROK_RELAY` on 443 only (the control channel is a WebSocket
+through Cloudflare; nothing on 7000). The relay is deployment-specific, so
+the project config opens the door itself: `egress = ["<relay>"]`, plus
+`<name>.<relay>` if the box should curl its own tunnels.
