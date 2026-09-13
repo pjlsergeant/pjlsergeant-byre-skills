@@ -5,7 +5,9 @@ relay behind Cloudflare. A client holding the shared token claims
 `https://<name>.$PROK_RELAY` for exactly as long as its frpc process stays
 connected — no DNS, cert, or cleanup per name. `PROK_AUTHTOKEN` and
 `PROK_RELAY` are required in the environment; if either is missing, tell
-the user to set it in the project config and relaunch.
+the user to set it and relaunch — the token via
+`byre credentials set PROK_AUTHTOKEN` or `env_from_host`, never a baked
+`[env]` literal; the relay hostname is not a secret and any form is fine.
 
 ## Running a tunnel
 
