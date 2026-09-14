@@ -138,7 +138,7 @@ httpPassword = '${auth#*:}'" ;;
     kill "$pid" 2>/dev/null
     lock "$name" && { clear_state "$name"; unlock "$name"; }
   }
-  trap 'release; exit 130' INT TERM
+  trap 'release; exit 130' INT TERM HUP
   fail() { release; die "$@"; }
 
   # The admin API is how we distinguish "running" from frpc's quiet
@@ -179,14 +179,38 @@ EOF
       state="$(curl -s --max-time 2 "http://127.0.0.1:$admin/api/status" | proxy_state "$name")"
       case "$state" in
         running*)
-          # Atomic handover from wrapper pid to frpc pid: a plain > would
-          # truncate first, and the empty-file window reads as "no owner"
-          # to a concurrent `up` holding the lock.
+          # Handover from wrapper pid to frpc pid, under the lock and
+          # ownership-checked: if frpc died this instant, a concurrent
+          # `up` may have reclaimed the name already, and its fresh
+          # state must not be overwritten. The rename keeps the file
+          # non-empty at every instant (a plain > truncates first, and
+          # an empty pidfile reads as "no owner").
+          lock "$name" || fail "another prok operation on '$name' is stuck; remove $STATE/$name.lock if nothing is running"
+          if [ "$(cat "$pidfile" 2>/dev/null)" != "$$" ]; then
+            unlock "$name"
+            fail "lost ownership of '$name' during startup"
+          fi
           printf '%s\n' "$pid" > "$pidfile.new" && mv "$pidfile.new" "$pidfile"
           echo "$admin" > "$STATE/$name.admin"
+          unlock "$name"
           echo "https://$name.$PROK_RELAY"
           [ -n "$auth" ] && echo "(basic auth: ${auth%%:*}:...)"
-          trap 'kill "$pid" 2>/dev/null' INT TERM
+          trap 'kill "$pid" 2>/dev/null' INT TERM HUP
+          # Keep watching: after a reconnect (relay restart, network
+          # blip) frps re-evaluates the name, and one taken meanwhile
+          # puts frpc back into its silent retry-forever -- the same
+          # footgun as at startup, so the same response: kill and fail.
+          err=""
+          while alive "$pid"; do
+            sleep 2
+            state="$(curl -s --max-time 2 "http://127.0.0.1:$admin/api/status" | proxy_state "$name")"
+            case "$state" in
+              *error*)
+                err="${state#*	}"
+                kill "$pid" 2>/dev/null
+                ;;
+            esac
+          done
           wait "$pid"
           rc=$?
           # Clean up only what is still ours: after a hard kill and a
@@ -196,6 +220,7 @@ EOF
             [ "$(cat "$pidfile" 2>/dev/null)" = "$pid" ] && clear_state "$name"
             unlock "$name"
           fi
+          [ -n "$err" ] && die "'$name': \"$err\" after a reconnect -- frpc was killed so it cannot seize the name later"
           exit "$rc"
           ;;
         *error*)
