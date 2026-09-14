@@ -82,23 +82,36 @@ alive() { kill -0 "$1" 2>/dev/null; }
 # holder is gone (crashed mid-section, or killed between mkdir and the
 # owner write) is stolen rather than stranded.
 lock() {
+  d="$STATE/$1.lock"
   i=0
-  until mkdir "$STATE/$1.lock" 2>/dev/null; do
+  while :; do
+    if mkdir "$d" 2>/dev/null; then
+      printf '%s\n' "$$" > "$d/owner"
+      return 0
+    fi
     i=$((i + 1))
+    [ "$i" -ge 40 ] && return 1
     if [ "$i" -ge 20 ]; then
-      o="$(cat "$STATE/$1.lock/owner" 2>/dev/null)"
+      o="$(cat "$d/owner" 2>/dev/null)"
       if [ -z "$o" ] || ! alive "$o"; then
-        rm -f "$STATE/$1.lock/owner"
-        rmdir "$STATE/$1.lock" 2>/dev/null
-        i=0; continue
+        # Atomic reap: the rename wins for exactly one contender, so
+        # two processes spotting the same dead holder can't both tear
+        # down and double-acquire; the loser keeps waiting. The
+        # renamed dir is junk (a leftover survives a kill landing
+        # right here; /tmp state dies with the container).
+        if mv "$d" "$d.reap.$$" 2>/dev/null; then
+          rm -rf "$d.reap.$$"
+        fi
       fi
-      return 1
     fi
     sleep 0.1
   done
-  printf '%s\n' "$$" > "$STATE/$1.lock/owner"
 }
 unlock() {
+  # Only the recorded holder may tear the lock down: a signal landing
+  # between a completed unlock and its flag reset can re-enter here
+  # while another process already holds a fresh lock.
+  [ "$(cat "$STATE/$1.lock/owner" 2>/dev/null)" = "$$" ] || return 0
   rm -f "$STATE/$1.lock/owner"
   rmdir "$STATE/$1.lock" 2>/dev/null
 }
