@@ -26,7 +26,9 @@ up runs in the foreground: the name is claimed while the process lives
 and released the moment it dies. It prints the public URL once the relay
 confirms the proxy is running, and FAILS FAST (non-zero exit, frpc
 killed) if the name is taken -- raw frpc would sit on a taken name
-retrying and silently seize it later.
+retrying and silently seize it later. The same watchdog keeps running
+after startup, so a name lost across a reconnect also kills the tunnel
+loudly instead of lurking.
 
 rules:
   - <name>: one lowercase DNS label ([a-z0-9-], no dots, max 63 chars).
@@ -57,7 +59,7 @@ need_env() {
 }
 
 need_bin() {
-  for b in frpc curl jq; do
+  for b in frpc curl jq flock; do
     command -v "$b" >/dev/null 2>&1 || die "$b not found on PATH"
   done
 }
@@ -74,47 +76,21 @@ proxy_state() {
 
 alive() { kill -0 "$1" 2>/dev/null; }
 
-# Per-name mutation lock (mkdir is atomic): every path that creates,
-# reclaims, or removes a tunnel's state files holds it, so a stale-state
+# Every path that creates, reclaims, or removes a tunnel's state files
+# runs under a kernel lock on $STATE/<name>.lockf (fd 9), so a stale
 # takeover and a delayed cleanup can never interleave into two owners or
-# a deleted replacement. Guarded sections are microseconds (no network
-# calls inside), so contenders spin briefly -- and a lock whose recorded
-# holder is gone (crashed mid-section, or killed between mkdir and the
-# owner write) is stolen rather than stranded.
-lock() {
-  d="$STATE/$1.lock"
-  i=0
-  while :; do
-    if mkdir "$d" 2>/dev/null; then
-      printf '%s\n' "$$" > "$d/owner"
-      return 0
-    fi
-    i=$((i + 1))
-    [ "$i" -ge 40 ] && return 1
-    if [ "$i" -ge 20 ]; then
-      o="$(cat "$d/owner" 2>/dev/null)"
-      if [ -z "$o" ] || ! alive "$o"; then
-        # Atomic reap: the rename wins for exactly one contender, so
-        # two processes spotting the same dead holder can't both tear
-        # down and double-acquire; the loser keeps waiting. The
-        # renamed dir is junk (a leftover survives a kill landing
-        # right here; /tmp state dies with the container).
-        if mv "$d" "$d.reap.$$" 2>/dev/null; then
-          rm -rf "$d.reap.$$"
-        fi
-      fi
-    fi
-    sleep 0.1
-  done
+# a deleted replacement. flock is released automatically when the
+# process dies -- die mid-section included -- so there is no stale-lock
+# state to steal or repair. The lockfile itself is NEVER deleted: a new
+# open would mint a fresh inode and locks on different inodes don't
+# exclude each other.
+# Usage: grab <name> [wait-secs] ... drop  (in-process paths), or a
+# subshell with `9>"$STATE/$name.lockf"` on its closing paren.
+grab() {
+  exec 9>>"$STATE/$1.lockf" || return 1
+  flock -w "${2:-5}" 9
 }
-unlock() {
-  # Only the recorded holder may tear the lock down: a signal landing
-  # between a completed unlock and its flag reset can re-enter here
-  # while another process already holds a fresh lock.
-  [ "$(cat "$STATE/$1.lock/owner" 2>/dev/null)" = "$$" ] || return 0
-  rm -f "$STATE/$1.lock/owner"
-  rmdir "$STATE/$1.lock" 2>/dev/null
-}
+drop() { flock -u 9 2>/dev/null; }
 
 # Remove a tunnel's state, pidfile last -- while the pidfile exists the
 # name reads as owned, so nothing else starts rebuilding the state
@@ -152,42 +128,30 @@ httpPassword = '$p'" ;;
   # during startup, frpc's once running -- so a concurrent `up` refuses,
   # and `down` can kill this tunnel from the moment anything exists to
   # manage. A dead pid in the file is stale state from a hard-killed
-  # wrapper: take it over, under the lock.
+  # wrapper: overwrite it, under the lock.
   pidfile="$STATE/$name.pid"
-  locked=0
-  lock "$name" || die "another prok operation on '$name' is stuck; remove $STATE/$name.lock if nothing is running"
-  locked=1
+  grab "$name" || die "another prok operation on '$name' is stuck holding $STATE/$name.lockf"
   oldpid="$(cat "$pidfile" 2>/dev/null)"
   if [ -n "$oldpid" ] && alive "$oldpid"; then
-    unlock "$name"
     die "'$name' is already up or starting from this box (prok down $name first)"
   fi
   printf '%s\n' "$$" > "$pidfile"
-  unlock "$name"; locked=0
+  drop
 
-  # From here every exit path must kill frpc and release the state --
-  # a headless frpc would keep the name, or seize a taken one later.
+  # Kill frpc and remove the state -- but only state that is still ours:
+  # a replacement `up` may own the name if our frpc already died. The
+  # re-grab is safe from any point: flock on the fd we already hold
+  # succeeds immediately, and on exit the kernel releases whatever we
+  # held.
   pid=""
-  # Kill frpc and remove the state -- but only state that is still ours
-  # (a replacement `up` may own the name if our frpc already died), and
-  # re-using the lock we already hold when a signal lands inside a
-  # locked section (a fresh lock attempt against ourselves would spin
-  # out and strand the lock dir).
   release() {
     kill "$pid" 2>/dev/null
-    # Three ways we can already hold the lock when a signal lands: the
-    # flag is set; the owner file names us (signal between the owner
-    # write and the flag assignment); or neither yet (signal between
-    # mkdir and the owner write) -- that last one resolves through
-    # lock()'s ownerless-steal after its spin.
-    if [ "$locked" -eq 1 ] \
-      || [ "$(cat "$STATE/$name.lock/owner" 2>/dev/null)" = "$$" ] \
-      || { lock "$name" && locked=1; }; then
+    if grab "$name"; then
       owner="$(cat "$pidfile" 2>/dev/null)"
       if [ "$owner" = "$$" ] || { [ -n "$pid" ] && [ "$owner" = "$pid" ]; }; then
         clear_state "$name"
       fi
-      unlock "$name"; locked=0
+      drop
     fi
   }
   trap 'release; exit 130' INT TERM HUP
@@ -237,14 +201,13 @@ EOF
           # state must not be overwritten. The rename keeps the file
           # non-empty at every instant (a plain > truncates first, and
           # an empty pidfile reads as "no owner").
-          lock "$name" || fail "another prok operation on '$name' is stuck; remove $STATE/$name.lock if nothing is running"
-          locked=1
+          grab "$name" || fail "another prok operation on '$name' is stuck holding $STATE/$name.lockf"
           if [ "$(cat "$pidfile" 2>/dev/null)" != "$$" ]; then
             fail "lost ownership of '$name' during startup"
           fi
           printf '%s\n' "$pid" > "$pidfile.new" && mv "$pidfile.new" "$pidfile"
           echo "$admin" > "$STATE/$name.admin"
-          unlock "$name"; locked=0
+          drop
           echo "https://$name.$PROK_RELAY"
           [ -n "$auth" ] && echo "(basic auth: ${auth%%:*}:...)"
           trap 'kill "$pid" 2>/dev/null' INT TERM HUP
@@ -268,9 +231,9 @@ EOF
           # Clean up only what is still ours: after a hard kill and a
           # replacement `up`, the state belongs to the new tunnel. The
           # ownership check and the removal sit under the same lock.
-          if lock "$name"; then
+          if grab "$name"; then
             [ "$(cat "$pidfile" 2>/dev/null)" = "$pid" ] && clear_state "$name"
-            unlock "$name"
+            drop
           fi
           [ -n "$err" ] && die "'$name': \"$err\" after a reconnect -- frpc was killed so it cannot seize the name later"
           exit "$rc"
@@ -305,11 +268,10 @@ status() {
     if ! alive "$pid"; then
       echo "$name	https://$name.$PROK_RELAY	dead (stale state removed)"
       # Re-check under the lock: a replacement `up` may own it by now.
-      if lock "$name"; then
+      ( flock -w 2 9 || exit
         p="$(cat "$pidf" 2>/dev/null)"
         [ -n "$p" ] && ! alive "$p" && clear_state "$name"
-        unlock "$name"
-      fi
+      ) 9>>"$STATE/$name.lockf"
       rc=1; continue
     fi
     admin="$(cat "$STATE/$name.admin" 2>/dev/null)"
@@ -347,11 +309,9 @@ down() {
     # check keeps hands off a replacement tunnel that reclaimed the
     # name in the meantime; check and removal sit under the same lock.
     ( sleep 1
-      if lock "$name"; then
-        [ "$(cat "$pidf" 2>/dev/null)" = "$pid" ] && ! alive "$pid" && clear_state "$name"
-        unlock "$name"
-      fi
-    ) &
+      flock -w 2 9 || exit
+      [ "$(cat "$pidf" 2>/dev/null)" = "$pid" ] && ! alive "$pid" && clear_state "$name"
+    ) 9>>"$STATE/$name.lockf" &
   done
   if [ "$hit" -ne 0 ]; then
     [ -n "$only" ] && die "no tunnel named '$only' from this box"
