@@ -103,6 +103,12 @@ clear_state() {
 up() {
   name="${1:-}"; port="${2:-}"; auth="${3:-}"
   [ -n "$name" ] && [ -n "$port" ] || die "usage: prok up <name> <port> [user:pass]"
+  # grep matches per line, so an embedded newline would smuggle a bad
+  # line past the pattern (and into filenames and the TOML) -- reject
+  # newlines in every argument first.
+  nl='
+'
+  case "$name$port$auth" in *"$nl"*) die "arguments must not contain newlines" ;; esac
   echo "$name" | grep -Eq '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' \
     || die "bad name '$name': one lowercase DNS label ([a-z0-9-], no dots, max 63 chars)"
   echo "$port" | grep -Eq '^[0-9]+$' && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] \
@@ -149,6 +155,15 @@ httpPassword = '$p'" ;;
     if grab "$name"; then
       owner="$(cat "$pidfile" 2>/dev/null)"
       if [ "$owner" = "$$" ] || { [ -n "$pid" ] && [ "$owner" = "$pid" ]; }; then
+        # A signal can land between spawning frpc and pid=\$! catching
+        # it; while the state is still ours, sweep any frpc running our
+        # config path so no orphan outlives it. (A replacement's frpc
+        # never dies here: the ownership check above already failed.)
+        for d in /proc/[0-9]*; do
+          case "$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)" in
+            *"frpc -c $STATE/$name.toml"*) kill "${d#/proc/}" 2>/dev/null ;;
+          esac
+        done
         clear_state "$name"
       fi
       drop
