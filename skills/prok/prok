@@ -51,7 +51,7 @@ secrets -- frpc resolves the token from the environment at connect time.
 EOF
 }
 
-die() { echo "prok: $*" >&2; exit 1; }
+die() { printf 'prok: %s\n' "$*" >&2; exit 1; }
 
 need_env() {
   [ -n "${PROK_RELAY:-}" ] || die "PROK_RELAY is not set -- the relay base hostname; set it in the project config (env_from_host or [env]; it is not a secret) and relaunch"
@@ -109,9 +109,11 @@ up() {
   nl='
 '
   case "$name$port$auth" in *"$nl"*) die "arguments must not contain newlines" ;; esac
-  echo "$name" | grep -Eq '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' \
+  # printf, not echo: dash's echo expands backslash escapes, so a name
+  # holding a literal \n would reach grep as two lines.
+  printf '%s\n' "$name" | grep -Eq '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' \
     || die "bad name '$name': one lowercase DNS label ([a-z0-9-], no dots, max 63 chars)"
-  echo "$port" | grep -Eq '^[0-9]+$' && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] \
+  printf '%s\n' "$port" | grep -Eq '^[0-9]+$' && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] \
     || die "bad port '$port'"
   authlines=""
   if [ -n "$auth" ]; then
@@ -155,15 +157,6 @@ httpPassword = '$p'" ;;
     if grab "$name"; then
       owner="$(cat "$pidfile" 2>/dev/null)"
       if [ "$owner" = "$$" ] || { [ -n "$pid" ] && [ "$owner" = "$pid" ]; }; then
-        # A signal can land between spawning frpc and pid=\$! catching
-        # it; while the state is still ours, sweep any frpc running our
-        # config path so no orphan outlives it. (A replacement's frpc
-        # never dies here: the ownership check above already failed.)
-        for d in /proc/[0-9]*; do
-          case "$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)" in
-            *"frpc -c $STATE/$name.toml"*) kill "${d#/proc/}" 2>/dev/null ;;
-          esac
-        done
         clear_state "$name"
       fi
       drop
@@ -194,8 +187,16 @@ subdomain = '$name'
 localPort = $port
 $authlines
 EOF
+    # Signals are ignored (dropped, not deferred) across the spawn and
+    # the pid capture: a signal landing exactly between the two would
+    # otherwise run release() before it knows this frpc's pid, leaving
+    # an unmanaged client holding -- or later seizing -- the name. The
+    # window is microseconds; a perfectly timed Ctrl-C is swallowed and
+    # the next one works.
+    trap '' INT TERM HUP
     frpc -c "$STATE/$name.toml" > "$STATE/$name.log" 2>&1 &
     pid=$!
+    trap 'release; exit 130' INT TERM HUP
 
     tries=0
     while [ "$tries" -lt 40 ]; do
@@ -223,8 +224,8 @@ EOF
           printf '%s\n' "$pid" > "$pidfile.new" && mv "$pidfile.new" "$pidfile"
           echo "$admin" > "$STATE/$name.admin"
           drop
-          echo "https://$name.$PROK_RELAY"
-          [ -n "$auth" ] && echo "(basic auth: ${auth%%:*}:...)"
+          printf 'https://%s.%s\n' "$name" "$PROK_RELAY"
+          [ -n "$auth" ] && printf '(basic auth: %s:...)\n' "${auth%%:*}"
           trap 'kill "$pid" 2>/dev/null' INT TERM HUP
           # Keep watching: after a reconnect (relay restart, network
           # blip) frps re-evaluates the name, and one taken meanwhile
@@ -281,7 +282,7 @@ status() {
     found=0
     pid="$(cat "$pidf")"
     if ! alive "$pid"; then
-      echo "$name	https://$name.$PROK_RELAY	dead (stale state removed)"
+      printf '%s\thttps://%s.%s\tdead (stale state removed)\n' "$name" "$name" "$PROK_RELAY"
       # Re-check under the lock: a replacement `up` may own it by now.
       ( flock -w 2 9 || exit
         p="$(cat "$pidf" 2>/dev/null)"
@@ -293,9 +294,9 @@ status() {
     state="$(curl -s --max-time 2 "http://127.0.0.1:${admin:-0}/api/status" | proxy_state "$name")"
     st="${state%%	*}"; err="${state#*	}"
     case "$st" in
-      running) echo "$name	https://$name.$PROK_RELAY	running" ;;
-      "") echo "$name	https://$name.$PROK_RELAY	starting (admin API not answering yet)"; rc=1 ;;
-      *) echo "$name	https://$name.$PROK_RELAY	$st${err:+ ($err)}"; rc=1 ;;
+      running) printf '%s\thttps://%s.%s\trunning\n' "$name" "$name" "$PROK_RELAY" ;;
+      "") printf '%s\thttps://%s.%s\tstarting (admin API not answering yet)\n' "$name" "$name" "$PROK_RELAY"; rc=1 ;;
+      *) printf '%s\thttps://%s.%s\t%s\n' "$name" "$name" "$PROK_RELAY" "$st${err:+ ($err)}"; rc=1 ;;
     esac
   done
   if [ "$found" -ne 0 ]; then
@@ -315,9 +316,9 @@ down() {
     pid="$(cat "$pidf")"
     if alive "$pid"; then
       kill "$pid" 2>/dev/null
-      echo "$name: killed (name released)"
+      printf '%s: killed (name released)\n' "$name"
     else
-      echo "$name: was already dead"
+      printf '%s: was already dead\n' "$name"
     fi
     # A live `up` wrapper cleans its own state when its wait returns;
     # this covers orphans whose wrapper is gone. The pidfile-content
