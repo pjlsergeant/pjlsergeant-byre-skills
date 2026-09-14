@@ -93,7 +93,7 @@ unlock() { rmdir "$STATE/$1.lock" 2>/dev/null; }
 # name reads as owned, so nothing else starts rebuilding the state
 # mid-removal. Caller holds the lock.
 clear_state() {
-  rm -f "$STATE/$1.admin" "$STATE/$1.toml" "$STATE/$1.log"
+  rm -f "$STATE/$1.admin" "$STATE/$1.toml" "$STATE/$1.log" "$STATE/$1.pid.new"
   rm -f "$STATE/$1.pid"
 }
 
@@ -179,7 +179,10 @@ EOF
       state="$(curl -s --max-time 2 "http://127.0.0.1:$admin/api/status" | proxy_state "$name")"
       case "$state" in
         running*)
-          printf '%s\n' "$pid" > "$pidfile"
+          # Atomic handover from wrapper pid to frpc pid: a plain > would
+          # truncate first, and the empty-file window reads as "no owner"
+          # to a concurrent `up` holding the lock.
+          printf '%s\n' "$pid" > "$pidfile.new" && mv "$pidfile.new" "$pidfile"
           echo "$admin" > "$STATE/$name.admin"
           echo "https://$name.$PROK_RELAY"
           [ -n "$auth" ] && echo "(basic auth: ${auth%%:*}:...)"
