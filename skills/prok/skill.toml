@@ -64,4 +64,4 @@ sha256 = "2c4a8352639f1e2500722d94f0c995577ba7c4c8b95abd11264dc8cfb4fb0629"
 [[package.files]]
 src = "prok"
 dest = "prok"
-sha256 = "3aa59beb988f1bde14b9ca6f8df8f8f5234d34cb31fbc55cf7af68f16c36d131"
+sha256 = "932e88fdf8c73d22081803859eaea2ec85c72aced2c9f3562984bac03fad74b7"

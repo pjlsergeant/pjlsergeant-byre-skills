@@ -93,9 +93,31 @@ httpPassword = '${auth#*:}'" ;;
   need_env; need_bin
   mkdir -p "$STATE" && chmod 700 "$STATE"
 
-  if [ -f "$STATE/$name.pid" ] && alive "$(cat "$STATE/$name.pid")"; then
-    die "'$name' is already up from this box (prok down $name first)"
+  # $name.pid doubles as the lock: created (noclobber) BEFORE frpc
+  # starts, holding the wrapper's pid during startup and frpc's once
+  # running -- so a concurrent `up` refuses, and `down` can kill this
+  # tunnel from the moment anything exists to manage. A dead pid in the
+  # file is stale state from a hard-killed wrapper: take it over.
+  pidfile="$STATE/$name.pid"
+  if ! ( set -C; printf '%s\n' "$$" > "$pidfile" ) 2>/dev/null; then
+    oldpid="$(cat "$pidfile" 2>/dev/null)"
+    if [ -n "$oldpid" ] && alive "$oldpid"; then
+      die "'$name' is already up or starting from this box (prok down $name first)"
+    fi
+    rm -f "$pidfile"
+    ( set -C; printf '%s\n' "$$" > "$pidfile" ) 2>/dev/null \
+      || die "lost a race with another \`prok up $name\`"
   fi
+
+  # From here every exit path must kill frpc and release the state --
+  # a headless frpc would keep the name, or seize a taken one later.
+  pid=""
+  release() {
+    kill "$pid" 2>/dev/null
+    rm -f "$pidfile" "$STATE/$name.admin" "$STATE/$name.toml" "$STATE/$name.log"
+  }
+  trap 'release; exit 130' INT TERM
+  fail() { release; die "$@"; }
 
   # The admin API is how we distinguish "running" from frpc's quiet
   # retry-forever on a taken name. Ports may be held by our other
@@ -130,44 +152,40 @@ EOF
         fi
         echo "prok: frpc exited during startup:" >&2
         tail -3 "$STATE/$name.log" >&2
-        rm -f "$STATE/$name.toml" "$STATE/$name.log"
-        exit 1
+        fail "could not start '$name'"
       fi
       state="$(curl -s --max-time 2 "http://127.0.0.1:$admin/api/status" | proxy_state "$name")"
       case "$state" in
         running*)
-          echo "$pid"   > "$STATE/$name.pid"
+          printf '%s\n' "$pid" > "$pidfile"
           echo "$admin" > "$STATE/$name.admin"
           echo "https://$name.$PROK_RELAY"
           [ -n "$auth" ] && echo "(basic auth: ${auth%%:*}:...)"
           trap 'kill "$pid" 2>/dev/null' INT TERM
           wait "$pid"
           rc=$?
-          rm -f "$STATE/$name.pid" "$STATE/$name.admin" "$STATE/$name.toml" "$STATE/$name.log"
+          # Clean up only what is still ours: after a hard kill and a
+          # replacement `up`, the state belongs to the new tunnel.
+          [ "$(cat "$pidfile" 2>/dev/null)" = "$pid" ] && release
           exit "$rc"
           ;;
         *error*)
           err="${state#*	}"
-          kill "$pid" 2>/dev/null
-          rm -f "$STATE/$name.toml" "$STATE/$name.log"
           case "$err" in
             *"router config conflict"*|*"already exists"*)
-              die "name '$name' is taken on the relay ($err) -- pick another; frpc was killed so it cannot seize the name later" ;;
+              fail "name '$name' is taken on the relay ($err) -- pick another; frpc was killed so it cannot seize the name later" ;;
             *)
-              die "proxy failed: $err" ;;
+              fail "proxy failed: $err" ;;
           esac
           ;;
       esac
       tries=$((tries + 1)); sleep 0.5
     done
-    kill "$pid" 2>/dev/null
-    rm -f "$STATE/$name.toml"
     echo "prok: no answer from the relay after 20s; last log lines:" >&2
     tail -3 "$STATE/$name.log" >&2
-    rm -f "$STATE/$name.log"
-    exit 1
+    fail "gave up waiting for '$name'"
   done
-  die "no free admin port in 7400-7449"
+  fail "no free admin port in 7400-7449"
 }
 
 status() {
@@ -188,7 +206,7 @@ status() {
     st="${state%%	*}"; err="${state#*	}"
     case "$st" in
       running) echo "$name	https://$name.$PROK_RELAY	running" ;;
-      "") echo "$name	https://$name.$PROK_RELAY	unknown (admin API not answering)"; rc=1 ;;
+      "") echo "$name	https://$name.$PROK_RELAY	starting (admin API not answering yet)"; rc=1 ;;
       *) echo "$name	https://$name.$PROK_RELAY	$st${err:+ ($err)}"; rc=1 ;;
     esac
   done
@@ -213,9 +231,14 @@ down() {
     else
       echo "$name: was already dead"
     fi
-    # `up` cleans its own state when its wait returns; this covers
-    # orphans whose wrapper is gone.
-    ( sleep 1; alive "$pid" || rm -f "$STATE/$name.pid" "$STATE/$name.admin" "$STATE/$name.toml" "$STATE/$name.log" ) &
+    # A live `up` wrapper cleans its own state when its wait returns;
+    # this covers orphans whose wrapper is gone. The pidfile-content
+    # check keeps hands off a replacement tunnel that reclaimed the
+    # name in the meantime.
+    ( sleep 1
+      [ "$(cat "$pidf" 2>/dev/null)" = "$pid" ] && ! alive "$pid" \
+        && rm -f "$STATE/$name.pid" "$STATE/$name.admin" "$STATE/$name.toml" "$STATE/$name.log"
+    ) &
   done
   if [ "$hit" -ne 0 ]; then
     [ -n "$only" ] && die "no tunnel named '$only' from this box"
