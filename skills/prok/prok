@@ -78,16 +78,30 @@ alive() { kill -0 "$1" 2>/dev/null; }
 # reclaims, or removes a tunnel's state files holds it, so a stale-state
 # takeover and a delayed cleanup can never interleave into two owners or
 # a deleted replacement. Guarded sections are microseconds (no network
-# calls inside), so contenders spin briefly and then give up.
+# calls inside), so contenders spin briefly -- and a lock whose recorded
+# holder is gone (crashed mid-section, or killed between mkdir and the
+# owner write) is stolen rather than stranded.
 lock() {
   i=0
   until mkdir "$STATE/$1.lock" 2>/dev/null; do
     i=$((i + 1))
-    [ "$i" -ge 20 ] && return 1
+    if [ "$i" -ge 20 ]; then
+      o="$(cat "$STATE/$1.lock/owner" 2>/dev/null)"
+      if [ -z "$o" ] || ! alive "$o"; then
+        rm -f "$STATE/$1.lock/owner"
+        rmdir "$STATE/$1.lock" 2>/dev/null
+        i=0; continue
+      fi
+      return 1
+    fi
     sleep 0.1
   done
+  printf '%s\n' "$$" > "$STATE/$1.lock/owner"
 }
-unlock() { rmdir "$STATE/$1.lock" 2>/dev/null; }
+unlock() {
+  rm -f "$STATE/$1.lock/owner"
+  rmdir "$STATE/$1.lock" 2>/dev/null
+}
 
 # Remove a tunnel's state, pidfile last -- while the pidfile exists the
 # name reads as owned, so nothing else starts rebuilding the state
@@ -148,7 +162,14 @@ httpPassword = '$p'" ;;
   # out and strand the lock dir).
   release() {
     kill "$pid" 2>/dev/null
-    if [ "$locked" -eq 1 ] || { lock "$name" && locked=1; }; then
+    # Three ways we can already hold the lock when a signal lands: the
+    # flag is set; the owner file names us (signal between the owner
+    # write and the flag assignment); or neither yet (signal between
+    # mkdir and the owner write) -- that last one resolves through
+    # lock()'s ownerless-steal after its spin.
+    if [ "$locked" -eq 1 ] \
+      || [ "$(cat "$STATE/$name.lock/owner" 2>/dev/null)" = "$$" ] \
+      || { lock "$name" && locked=1; }; then
       owner="$(cat "$pidfile" 2>/dev/null)"
       if [ "$owner" = "$$" ] || { [ -n "$pid" ] && [ "$owner" = "$pid" ]; }; then
         clear_state "$name"
