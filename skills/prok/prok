@@ -1,0 +1,232 @@
+#!/bin/sh
+# prok -- expose a local port at https://<name>.$PROK_RELAY via the prok
+# relay (frps behind Cloudflare, spoken to with frpc over wss:443). The
+# name lives exactly as long as the tunnel process does.
+#
+# Run bare for the docs. Wraps frpc because raw frpc has two traps this
+# script closes: a taken name is only a log warning (frpc stays up,
+# retrying, and silently seizes the name when its holder disconnects),
+# and success is only visible in the log. Here: `up` polls frpc's admin
+# API, prints the URL on success, and exits non-zero after killing frpc
+# on any proxy error; `status` answers "what is my URL and is it up".
+set -u
+
+STATE="${TMPDIR:-/tmp}/prok.$(id -u)"
+
+docs() {
+  cat <<EOF
+prok -- claim https://<name>.\$PROK_RELAY while a tunnel process lives
+
+usage:
+  prok up <name> <port> [user:pass]   expose localhost:<port> as <name>
+  prok status [<name>]                each tunnel: name, URL, state
+  prok down [<name>]                  kill tunnel(s), releasing the name(s)
+
+up runs in the foreground: the name is claimed while the process lives
+and released the moment it dies. It prints the public URL once the relay
+confirms the proxy is running, and FAILS FAST (non-zero exit, frpc
+killed) if the name is taken -- raw frpc would sit on a taken name
+retrying and silently seize it later.
+
+rules:
+  - <name>: one lowercase DNS label ([a-z0-9-], no dots, max 63 chars).
+    Unique across ALL clients of the relay.
+  - Names are PUBLIC and guessable the moment the proxy starts; scanners
+    find new hostnames in minutes. Only expose throwaway services, add a
+    random suffix, and gate anything sensitive with [user:pass] -- the
+    relay then answers 401 without credentials (HTTP basic auth,
+    enforced relay-side, no setup).
+  - HTTP only (websockets fine); no raw TCP/UDP.
+
+environment (required):
+  PROK_AUTHTOKEN  shared secret (a credential: set via
+                  \`byre credentials set\` or env_from_host, never a
+                  baked [env] literal)
+  PROK_RELAY      relay base hostname; egress is <relay>:443 only
+
+state lives under $STATE (config, pid, log per tunnel); configs hold no
+secrets -- frpc resolves the token from the environment at connect time.
+EOF
+}
+
+die() { echo "prok: $*" >&2; exit 1; }
+
+need_env() {
+  [ -n "${PROK_RELAY:-}" ] || die "PROK_RELAY is not set -- the relay base hostname; set it in the project config (env_from_host or [env]; it is not a secret) and relaunch"
+  [ -n "${PROK_AUTHTOKEN:-}" ] || die "PROK_AUTHTOKEN is not set -- a credential: set it via \`byre credentials set PROK_AUTHTOKEN\` or env_from_host (never a baked [env] literal) and relaunch"
+}
+
+need_bin() {
+  for b in frpc curl jq; do
+    command -v "$b" >/dev/null 2>&1 || die "$b not found on PATH"
+  done
+}
+
+# "$1"'s "status<TAB>err" from an admin API answer on stdin. Selecting by
+# name matters: while probing for a free admin port we can curl an admin
+# API belonging to ANOTHER of our tunnels, whose different proxy must
+# read as "not ours yet", never as our success.
+proxy_state() {
+  jq -r --arg n "$1" \
+    '[.[][]? | select(.name == $n)] | if length == 0 then "" else .[0] | "\(.status)\t\(.err)" end' \
+    2>/dev/null
+}
+
+alive() { kill -0 "$1" 2>/dev/null; }
+
+up() {
+  name="${1:-}"; port="${2:-}"; auth="${3:-}"
+  [ -n "$name" ] && [ -n "$port" ] || die "usage: prok up <name> <port> [user:pass]"
+  echo "$name" | grep -Eq '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' \
+    || die "bad name '$name': one lowercase DNS label ([a-z0-9-], no dots, max 63 chars)"
+  echo "$port" | grep -Eq '^[0-9]+$' && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] \
+    || die "bad port '$port'"
+  authlines=""
+  if [ -n "$auth" ]; then
+    case "$auth" in
+      *"'"*) die "user:pass must not contain single quotes" ;;
+      *:*) authlines="httpUser = '${auth%%:*}'
+httpPassword = '${auth#*:}'" ;;
+      *) die "auth must be user:pass" ;;
+    esac
+  fi
+  need_env; need_bin
+  mkdir -p "$STATE" && chmod 700 "$STATE"
+
+  if [ -f "$STATE/$name.pid" ] && alive "$(cat "$STATE/$name.pid")"; then
+    die "'$name' is already up from this box (prok down $name first)"
+  fi
+
+  # The admin API is how we distinguish "running" from frpc's quiet
+  # retry-forever on a taken name. Ports may be held by our other
+  # tunnels; frpc exits at once on a taken bind, so just try the next.
+  admin=7400
+  while [ "$admin" -le 7449 ]; do
+    cat > "$STATE/$name.toml" <<EOF
+serverAddr = '{{ .Envs.PROK_RELAY }}'
+serverPort = 443
+transport.protocol = "wss"
+transport.tls.trustedCaFile = "/etc/ssl/certs/ca-certificates.crt"
+auth.token = '{{ .Envs.PROK_AUTHTOKEN }}'
+log.disablePrintColor = true
+webServer.addr = "127.0.0.1"
+webServer.port = $admin
+
+[[proxies]]
+name = '$name'
+type = "http"
+subdomain = '$name'
+localPort = $port
+$authlines
+EOF
+    frpc -c "$STATE/$name.toml" > "$STATE/$name.log" 2>&1 &
+    pid=$!
+
+    tries=0
+    while [ "$tries" -lt 40 ]; do
+      if ! alive "$pid"; then
+        if grep -q "bind: address already in use" "$STATE/$name.log"; then
+          admin=$((admin + 1)); continue 2
+        fi
+        echo "prok: frpc exited during startup:" >&2
+        tail -3 "$STATE/$name.log" >&2
+        rm -f "$STATE/$name.toml" "$STATE/$name.log"
+        exit 1
+      fi
+      state="$(curl -s --max-time 2 "http://127.0.0.1:$admin/api/status" | proxy_state "$name")"
+      case "$state" in
+        running*)
+          echo "$pid"   > "$STATE/$name.pid"
+          echo "$admin" > "$STATE/$name.admin"
+          echo "https://$name.$PROK_RELAY"
+          [ -n "$auth" ] && echo "(basic auth: ${auth%%:*}:...)"
+          trap 'kill "$pid" 2>/dev/null' INT TERM
+          wait "$pid"
+          rc=$?
+          rm -f "$STATE/$name.pid" "$STATE/$name.admin" "$STATE/$name.toml" "$STATE/$name.log"
+          exit "$rc"
+          ;;
+        *error*)
+          err="${state#*	}"
+          kill "$pid" 2>/dev/null
+          rm -f "$STATE/$name.toml" "$STATE/$name.log"
+          case "$err" in
+            *"router config conflict"*|*"already exists"*)
+              die "name '$name' is taken on the relay ($err) -- pick another; frpc was killed so it cannot seize the name later" ;;
+            *)
+              die "proxy failed: $err" ;;
+          esac
+          ;;
+      esac
+      tries=$((tries + 1)); sleep 0.5
+    done
+    kill "$pid" 2>/dev/null
+    rm -f "$STATE/$name.toml"
+    echo "prok: no answer from the relay after 20s; last log lines:" >&2
+    tail -3 "$STATE/$name.log" >&2
+    rm -f "$STATE/$name.log"
+    exit 1
+  done
+  die "no free admin port in 7400-7449"
+}
+
+status() {
+  only="${1:-}"; need_env; found=1; rc=0
+  for pidf in "$STATE"/*.pid; do
+    [ -f "$pidf" ] || continue
+    name="$(basename "$pidf" .pid)"
+    [ -n "$only" ] && [ "$name" != "$only" ] && continue
+    found=0
+    pid="$(cat "$pidf")"
+    if ! alive "$pid"; then
+      echo "$name	https://$name.$PROK_RELAY	dead (stale state removed)"
+      rm -f "$STATE/$name.pid" "$STATE/$name.admin" "$STATE/$name.toml" "$STATE/$name.log"
+      rc=1; continue
+    fi
+    admin="$(cat "$STATE/$name.admin" 2>/dev/null)"
+    state="$(curl -s --max-time 2 "http://127.0.0.1:${admin:-0}/api/status" | proxy_state "$name")"
+    st="${state%%	*}"; err="${state#*	}"
+    case "$st" in
+      running) echo "$name	https://$name.$PROK_RELAY	running" ;;
+      "") echo "$name	https://$name.$PROK_RELAY	unknown (admin API not answering)"; rc=1 ;;
+      *) echo "$name	https://$name.$PROK_RELAY	$st${err:+ ($err)}"; rc=1 ;;
+    esac
+  done
+  if [ "$found" -ne 0 ]; then
+    [ -n "$only" ] && die "no tunnel named '$only' from this box"
+    echo "no tunnels up from this box"
+  fi
+  exit "$rc"
+}
+
+down() {
+  only="${1:-}"; hit=1
+  for pidf in "$STATE"/*.pid; do
+    [ -f "$pidf" ] || continue
+    name="$(basename "$pidf" .pid)"
+    [ -n "$only" ] && [ "$name" != "$only" ] && continue
+    hit=0
+    pid="$(cat "$pidf")"
+    if alive "$pid"; then
+      kill "$pid" 2>/dev/null
+      echo "$name: killed (name released)"
+    else
+      echo "$name: was already dead"
+    fi
+    # `up` cleans its own state when its wait returns; this covers
+    # orphans whose wrapper is gone.
+    ( sleep 1; alive "$pid" || rm -f "$STATE/$name.pid" "$STATE/$name.admin" "$STATE/$name.toml" "$STATE/$name.log" ) &
+  done
+  if [ "$hit" -ne 0 ]; then
+    [ -n "$only" ] && die "no tunnel named '$only' from this box"
+    echo "no tunnels up from this box"
+  fi
+}
+
+case "${1:-}" in
+  up)     shift; up "$@" ;;
+  status) shift; status "${1:-}" ;;
+  down)   shift; down "${1:-}" ;;
+  ""|-h|--help|help) docs ;;
+  *) die "unknown command '${1}' (run \`prok\` for the docs)" ;;
+esac

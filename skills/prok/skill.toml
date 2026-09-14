@@ -4,22 +4,28 @@ version = "1.0.0"
 kind = "skill"
 package_api = 1
 requires_byre = ">=0.1.10"
-description = "frpc client for a self-hosted prok relay (frps behind Cloudflare): claim https://<name>.<relay> for as long as the process stays connected. Auth and relay host come from PROK_AUTHTOKEN / PROK_RELAY at use time."
+description = "prok, a self-hosted ngrok: claim https://<name>.<relay> for as long as the tunnel process lives. Ships frpc plus a `prok` wrapper (up/status/down) that fails fast on taken names via frpc's admin API. Auth and relay host come from PROK_AUTHTOKEN / PROK_RELAY at use time."
 
 [build]
 # frp isn't packaged for Debian, so this fetches fatedier/frp's release
 # tarball from GitHub, pinned to v0.71.0 and verified against the sha256s
 # from that release's frp_sha256_checksums.txt (both values cross-checked
 # against an independent download on 2026-09-14). Only the single static
-# `frpc` binary ships; frps and the sample configs are discarded. No baked
-# config, firstrun hook, or state volume: the context note has the agent
-# write a throwaway config at use time whose token/relay values are frpc
+# `frpc` binary ships; frps and the sample configs are discarded. On top
+# of it goes the `prok` wrapper (this package's own script): it writes a
+# throwaway per-tunnel config whose token/relay values are frpc
 # {{ .Envs }} templates -- resolved from the environment by frpc itself,
-# never stored. (A config file rather than the `frpc http` one-liner
-# because only the config can set transport.tls.trustedCaFile; without it
+# never stored -- and which pins transport.tls.trustedCaFile (without it
 # frpc v0.71.0 skips server certificate verification, wss included --
-# verified live against a wrong-CN cert.)
-apt = ["curl", "ca-certificates"]
+# verified live against a wrong-CN cert), then polls frpc's local admin
+# API so a taken name is a fast non-zero exit instead of frpc's silent
+# retry-forever. jq parses that API's JSON. No firstrun hook or state
+# volume: per-tunnel state is process-bound and lives in /tmp.
+apt = ["curl", "ca-certificates", "jq"]
+# The wrapper script; payload COPYs land before this block's RUN lines
+# (gen.SkillBlock: "COPY'd before raw lines"), and a fetched payload
+# carries no exec bit, hence the chmod below.
+files = { "prok" = "/usr/local/bin/prok" }
 dockerfile = [
   "RUN arch=\"$(dpkg --print-architecture)\" \\",
   " && case \"$arch\" in \\",
@@ -32,6 +38,7 @@ dockerfile = [
   " && tar -xzf /tmp/frp.tgz -C /tmp \"frp_0.71.0_linux_${arch}/frpc\" \\",
   " && install -m 0755 \"/tmp/frp_0.71.0_linux_${arch}/frpc\" /usr/local/bin/frpc \\",
   " && rm -rf /tmp/frp.tgz \"/tmp/frp_0.71.0_linux_${arch}\"",
+  "RUN chmod 0755 /usr/local/bin/prok",
 ]
 
 [runtime]
@@ -52,4 +59,9 @@ file = "context.md"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "c9a29db5ff8a0c1ed9528d0f51ea56afe350b130225f875167b819aaab505adf"
+sha256 = "2c4a8352639f1e2500722d94f0c995577ba7c4c8b95abd11264dc8cfb4fb0629"
+
+[[package.files]]
+src = "prok"
+dest = "prok"
+sha256 = "3aa59beb988f1bde14b9ca6f8df8f8f5234d34cb31fbc55cf7af68f16c36d131"

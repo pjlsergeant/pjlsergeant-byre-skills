@@ -1,62 +1,48 @@
 # prok (byre skill)
 
-`frpc` (frp v0.71.0) is on `PATH`. prok is a self-hosted ngrok: an frps
-relay behind Cloudflare. A client holding the shared token claims
-`https://<name>.$PROK_RELAY` for exactly as long as its frpc process stays
-connected — no DNS, cert, or cleanup per name. `PROK_AUTHTOKEN` and
-`PROK_RELAY` are required in the environment; if either is missing, tell
-the user to set it and relaunch — the token via
-`byre credentials set PROK_AUTHTOKEN` or `env_from_host`, never a baked
-`[env]` literal; the relay hostname is not a secret and any form is fine.
+prok is a self-hosted ngrok: an frps relay behind Cloudflare. A client
+holding the shared token claims `https://<name>.$PROK_RELAY` for exactly
+as long as its tunnel process lives — no DNS, cert, or cleanup per name.
 
-## Running a tunnel
-
-Write a config, run it in the foreground; the name lives while the process
-does:
+Use the `prok` command (on `PATH`; run it bare for the full docs):
 
 ```sh
-cat > /tmp/frpc-<name>.toml <<'EOF'
-serverAddr = '{{ .Envs.PROK_RELAY }}'
-serverPort = 443
-transport.protocol = "wss"
-transport.tls.trustedCaFile = "/etc/ssl/certs/ca-certificates.crt"
-auth.token = '{{ .Envs.PROK_AUTHTOKEN }}'
-
-[[proxies]]
-name = "<name>"
-type = "http"
-subdomain = "<name>"
-localPort = <port>
-EOF
-frpc -c /tmp/frpc-<name>.toml
+prok up <name> <port> [user:pass]   # foreground; prints the URL
+prok status [<name>]                # each tunnel: name, URL, state
+prok down [<name>]                  # kill the process = release the name
 ```
 
-The `{{ .Envs... }}` templates are expanded by frpc itself, so the token
-never lands in the file. Always use this form — the bare `frpc http ...`
-one-liner cannot set `trustedCaFile`, and without it frpc skips
-certificate verification entirely, letting anyone on the network path
-impersonate the relay and capture the token.
+`up` fails fast — non-zero exit, frpc killed — when the name is taken
+anywhere on the relay. That is the wrapper's reason to exist: raw frpc
+treats a taken name as a mere log warning, sits alive retrying every
+~30s, and silently seizes the name (exposing your port under it) the
+moment its holder disconnects. Don't drive `frpc` by hand unless prok
+itself is broken; if you must, start from the config in `prok`'s source —
+it pins `transport.tls.trustedCaFile`, without which frpc skips server
+certificate verification entirely — and kill the process yourself on any
+`start error` log line.
 
 ## Rules
 
-- `<name>` is ONE lowercase DNS label, no dots; use the same value for
-  `name` and `subdomain`.
-- A taken name fails with `start error: router config conflict` (the
-  subdomain) or `proxy [...] already exists` (the proxy name) — as a `[W]`
-  log line, not an exit. frpc stays up and retries every ~30s, and would
-  silently grab the name (exposing your port under it) the moment its
-  owner disconnects: kill the process, then retry with a different name.
-- The only success signal is `start proxy success` in YOUR process's log.
-  A successful curl proves nothing during a collision — the current owner
-  answers, not you.
-- Names are PUBLIC the moment the proxy starts; scanners find them within
-  minutes. Only expose throwaway, sacrificial services.
+- `<name>` is ONE lowercase DNS label, no dots, unique across ALL
+  clients of the relay.
+- Names are PUBLIC and guessable the moment the proxy starts; scanners
+  find new hostnames within minutes. Only expose throwaway, sacrificial
+  services; add a random suffix, and gate anything sensitive with
+  `[user:pass]` — HTTP basic auth the relay enforces (401 without
+  credentials), no setup needed.
 - HTTP only (websockets fine); no raw TCP/UDP.
-- Kill the process to release the name; it is reusable immediately.
+
+## Environment
+
+Both required; if missing, tell the user to set them and relaunch — the
+token via `byre credentials set PROK_AUTHTOKEN` or `env_from_host`,
+never a baked `[env]` literal; `PROK_RELAY` (the relay base hostname) is
+not a secret and any form is fine. There is no interactive login flow.
 
 ## Network
 
 Egress is `$PROK_RELAY` on 443 only (the control channel is a WebSocket
-through Cloudflare; nothing on 7000). The relay is deployment-specific, so
-the project config opens the door itself: `egress = ["<relay>"]`, plus
-`<name>.<relay>` if the box should curl its own tunnels.
+through Cloudflare; nothing on 7000). The relay is deployment-specific,
+so the project config opens the door itself: `egress = ["<relay>"]`,
+plus `<name>.<relay>` if the box should curl its own tunnels.
