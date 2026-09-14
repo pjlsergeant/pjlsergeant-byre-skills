@@ -108,8 +108,13 @@ up() {
   if [ -n "$auth" ]; then
     case "$auth" in
       *"'"*) die "user:pass must not contain single quotes" ;;
-      *:*) authlines="httpUser = '${auth%%:*}'
-httpPassword = '${auth#*:}'" ;;
+      *:*)
+        u="${auth%%:*}"; p="${auth#*:}"
+        # frp skips the auth check entirely when either field is empty,
+        # so ':' from two unset shell variables must not pass silently.
+        [ -n "$u" ] && [ -n "$p" ] || die "auth must be user:pass with both parts non-empty"
+        authlines="httpUser = '$u'
+httpPassword = '$p'" ;;
       *) die "auth must be user:pass" ;;
     esac
   fi
@@ -122,21 +127,34 @@ httpPassword = '${auth#*:}'" ;;
   # manage. A dead pid in the file is stale state from a hard-killed
   # wrapper: take it over, under the lock.
   pidfile="$STATE/$name.pid"
+  locked=0
   lock "$name" || die "another prok operation on '$name' is stuck; remove $STATE/$name.lock if nothing is running"
+  locked=1
   oldpid="$(cat "$pidfile" 2>/dev/null)"
   if [ -n "$oldpid" ] && alive "$oldpid"; then
     unlock "$name"
     die "'$name' is already up or starting from this box (prok down $name first)"
   fi
   printf '%s\n' "$$" > "$pidfile"
-  unlock "$name"
+  unlock "$name"; locked=0
 
   # From here every exit path must kill frpc and release the state --
   # a headless frpc would keep the name, or seize a taken one later.
   pid=""
+  # Kill frpc and remove the state -- but only state that is still ours
+  # (a replacement `up` may own the name if our frpc already died), and
+  # re-using the lock we already hold when a signal lands inside a
+  # locked section (a fresh lock attempt against ourselves would spin
+  # out and strand the lock dir).
   release() {
     kill "$pid" 2>/dev/null
-    lock "$name" && { clear_state "$name"; unlock "$name"; }
+    if [ "$locked" -eq 1 ] || { lock "$name" && locked=1; }; then
+      owner="$(cat "$pidfile" 2>/dev/null)"
+      if [ "$owner" = "$$" ] || { [ -n "$pid" ] && [ "$owner" = "$pid" ]; }; then
+        clear_state "$name"
+      fi
+      unlock "$name"; locked=0
+    fi
   }
   trap 'release; exit 130' INT TERM HUP
   fail() { release; die "$@"; }
@@ -186,13 +204,13 @@ EOF
           # non-empty at every instant (a plain > truncates first, and
           # an empty pidfile reads as "no owner").
           lock "$name" || fail "another prok operation on '$name' is stuck; remove $STATE/$name.lock if nothing is running"
+          locked=1
           if [ "$(cat "$pidfile" 2>/dev/null)" != "$$" ]; then
-            unlock "$name"
             fail "lost ownership of '$name' during startup"
           fi
           printf '%s\n' "$pid" > "$pidfile.new" && mv "$pidfile.new" "$pidfile"
           echo "$admin" > "$STATE/$name.admin"
-          unlock "$name"
+          unlock "$name"; locked=0
           echo "https://$name.$PROK_RELAY"
           [ -n "$auth" ] && echo "(basic auth: ${auth%%:*}:...)"
           trap 'kill "$pid" 2>/dev/null' INT TERM HUP
