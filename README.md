@@ -167,7 +167,7 @@ and the warning that matters: names are public the moment they come up, so
 only throwaway services go through them.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/TAG-TO-FILL/skills/prok/skill.toml --digest sha256:DIGEST-TO-FILL
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.9/skills/prok/skill.toml --digest sha256:04ef44e401768532c9370aa971e53b9903ae2d3f643ac0d4dfe830983f29fa9f
 ```
 
 ## Publishing a new version
