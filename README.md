@@ -28,11 +28,12 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 ### pjlsergeant/codereview
 
 byre-codereview -- the independent second-opinion review loop.
-Reviewers: codex (default), grok, claude, opencode, and zai (Z.AI/GLM, always
-under its own name -- never a silent codex fallback).
+Reviewers: codex (default), grok, claude, opencode, zai (Z.AI/GLM, always
+under its own name -- never a silent codex fallback), and mimo (Xiaomi MiMo
+Code, also takes mimo:<provider/model>).
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.8/skills/codereview/skill.toml --digest sha256:12e6c1904611ae8e46bb710491bc4630cdbd39ede1f1049d5d72a422a59e88f3
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.10/skills/codereview/skill.toml --digest sha256:8aacd9434d3555b664922b3690a34d0cb8d1a0d01b8221a124e2564bbf5857be
 ```
 
 ### pjlsergeant/toolbox
@@ -168,6 +169,29 @@ only throwaway services go through them.
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.9/skills/prok/skill.toml --digest sha256:04ef44e401768532c9370aa971e53b9903ae2d3f643ac0d4dfe830983f29fa9f
+```
+
+### pjlsergeant/mimo
+
+MiMo Code, Xiaomi's terminal coding agent (an OpenCode fork, MIT -- and also
+subject to upstream's
+[USE_RESTRICTIONS.md](https://github.com/XiaomiMiMo/MiMo-Code)), as a
+selectable byre agent: `agent = "pjlsergeant/mimo"`. The standalone `mimo`
+binary (0.1.15) is fetched from npm's per-platform packages, pinned and
+sha256-verified at build -- not via the official `curl | sh` installer,
+which pulls from a Xiaomi download host that publishes no checksums (and
+timed out from a box). byre's MCP servers and agent context are injected
+through `MIMOCODE_CONFIG_CONTENT`, composing with your own mimo config;
+autoupdate and upstream analytics are switched off. Auth is either the
+paste-code login a fresh box offers at first run (or later: `byre shell`,
+then `mimo auth login -p xiaomi`) or `XIAOMI_API_KEY` (a credential --
+`byre credentials set` or `env_from_host`, never a baked `[env]` literal);
+it persists per project in a state volume. The free anonymous MiMo channel
+has ended, and a platform account with no balance answers 402 -- both
+while `mimo run` still exits 0.
+
+```
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.10/skills/mimo/skill.toml --digest sha256:d28d724e0b7a5f034256c737f5a624569feccb4fd2ebd1c6fed91b7939953d10
 ```
 
 ## Publishing a new version
