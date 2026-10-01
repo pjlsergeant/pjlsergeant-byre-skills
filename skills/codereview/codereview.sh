@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # byre-codereview — an independent second-opinion review of the current changes.
 # Shipped by the codereview skill; pairs with a reviewer skill that installs the
-# reviewer binary: codex (the default), grok, claude, opencode, and/or zai.
+# reviewer binary: codex (the default), grok, claude, opencode, mimo, and/or zai.
 # Reviews the working tree's git changes and prints findings, and appends them
 # to .byre-devlog/reviews.md.
 #
@@ -12,8 +12,8 @@
 #   byre-codereview --raw "prompt"         # your prompt verbatim, no review prompt
 #
 # BYRE_REVIEWER sets the default reviewer (codex when unset). A reviewer is
-# "harness" or "harness:model" — see the parsing below; only opencode consumes
-# a model today.
+# "harness" or "harness:model" — see the parsing below; opencode and mimo (an
+# opencode fork) consume a model, the rest reject one.
 #
 # zai is the Z.AI (GLM) Codex wrapper: a reviewer under its OWN name, never a
 # silent fallback for codex. The Running line and reviews.md must say who
@@ -43,9 +43,10 @@ Usage:
   byre-codereview                        review current changes
   byre-codereview "focus area"           review current changes, focused on a topic
   byre-codereview --continue "..."       re-check after fixes (resumes prior session)
-  byre-codereview --reviewer <name> ...  choose the reviewer: codex (default) | grok | claude | opencode | zai
+  byre-codereview --reviewer <name> ...  choose the reviewer: codex (default) | grok | claude | opencode | mimo | zai
                                          opencode also takes a model as opencode:<provider/model>
-                                         (e.g. opencode:openrouter/~openai/gpt-latest)
+                                         (e.g. opencode:openrouter/~openai/gpt-latest), and
+                                         mimo likewise (e.g. mimo:xiaomi/mimo-v2.6-pro)
                                          zai reviews through the isolated Z.AI Codex home (GLM)
   byre-codereview --raw "prompt"         send YOUR prompt verbatim (skips the
                                          built-in review prompt; mechanics stay)
@@ -85,7 +86,7 @@ for arg in "$@"; do
   esac
 done
 if [ "$expect_reviewer" = true ]; then
-  echo "byre-codereview: --reviewer needs a value (codex | grok | claude | opencode | zai)." >&2
+  echo "byre-codereview: --reviewer needs a value (codex | grok | claude | opencode | mimo | zai)." >&2
   exit 2
 fi
 if [ "$RAW" = true ] && [ "${#FOCUS[@]}" -eq 0 ]; then
@@ -98,9 +99,10 @@ fi
 # (model ids may themselves contain slashes, e.g. openrouter/~openai/...).
 # $REVIEWER keeps the full user-given string for display — the Running line
 # and the reviews.md heading show what actually reviewed; $HARNESS drives
-# command lookup, session files, and dispatch. Only opencode consumes a model
-# today; a harness that got one it can't use must FAIL, not silently review
-# with its default while the log claims otherwise.
+# command lookup, session files, and dispatch. opencode and mimo (the same
+# `run --model` surface — mimo is an opencode fork) consume a model; a harness
+# that got one it can't use must FAIL, not silently review with its default
+# while the log claims otherwise.
 HARNESS="$REVIEWER"
 MODEL=""
 case "$REVIEWER" in
@@ -113,9 +115,9 @@ case "$REVIEWER" in
 esac
 
 case "$HARNESS" in
-  codex|grok|claude|opencode|zai) ;;
+  codex|grok|claude|opencode|mimo|zai) ;;
   *)
-    echo "byre-codereview: unsupported reviewer '$HARNESS' (codex | grok | claude | opencode | zai)." >&2
+    echo "byre-codereview: unsupported reviewer '$HARNESS' (codex | grok | claude | opencode | mimo | zai)." >&2
     exit 2
     ;;
 esac
@@ -123,7 +125,7 @@ esac
 if ! command -v "$HARNESS" >/dev/null 2>&1; then
   echo "byre-codereview: $HARNESS not found on PATH." >&2
   echo "  Add the $HARNESS skill (skills = [\"$HARNESS\", \"codereview\"]) and rebuild." >&2
-  for other in codex grok claude opencode zai; do
+  for other in codex grok claude opencode mimo zai; do
     [ "$other" = "$HARNESS" ] && continue
     if command -v "$other" >/dev/null 2>&1; then
       echo "  ($other is available: byre-codereview --reviewer $other)" >&2
@@ -134,8 +136,8 @@ fi
 
 # After the PATH check, so a missing harness is reported as the missing
 # harness it is — not as a model-wiring gap it also happens to have.
-if [ -n "$MODEL" ] && [ "$HARNESS" != opencode ]; then
-  echo "byre-codereview: model selection is only wired up for opencode — '$HARNESS' would silently ignore '$MODEL'." >&2
+if [ -n "$MODEL" ] && [ "$HARNESS" != opencode ] && [ "$HARNESS" != mimo ]; then
+  echo "byre-codereview: model selection is only wired up for opencode and mimo — '$HARNESS' would silently ignore '$MODEL'." >&2
   echo "  Run '--reviewer $HARNESS' plain, or extend the $HARNESS runner to consume a model." >&2
   exit 2
 fi
@@ -181,6 +183,19 @@ if [ "$HARNESS" = codex ]; then
   fi
 fi
 
+# mimo pre-flight. The pjlsergeant/mimo agent skill launches the AUTHORING
+# agent with MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS set, and byre-codereview runs
+# as that agent's child, so the reviewer would inherit it. In mimo 0.1.15 that
+# flag merges an allow-all base UNDER every config layer (config.ts:972,
+# verified in source 2026-10-01): explicit denies — ours included — still win,
+# but every "ask" becomes an allow, so the external_directory ask that confines
+# a headless reviewer to the repo would silently open. The reviewer must start
+# from mimo's own defaults, like zai's ZAI_CODEX_BIN strip above. Unconditional
+# and silent: a reviewer has no legitimate use for it.
+if [ "$HARNESS" = mimo ]; then
+  unset MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS
+fi
+
 # Persisted artifacts live in .byre-devlog/ at the repo root — a self-ignoring
 # dir (its own .gitignore is "*"), so the review log and agent diary persist via
 # the workspace mount but never land in git and need no per-project .gitignore
@@ -209,12 +224,17 @@ LOG_FILE="$REVIEW_DIR/reviews.md"
 # That crossing is legitimate — handing a thread to a stronger model is a real
 # move — but it must be VISIBLE, so opencode's file carries the reviewer
 # string on a second line and the resume path warns when it differs (surfaced
-# by a deepseek review of this very feature, 2026-08-08).
+# by a deepseek review of this very feature, 2026-08-08). mimo's file has the
+# same two-line shape for the same reason: it is the other model-taking
+# harness. Its ids are the same shape as opencode's (it is a fork), so the
+# separate file is what keeps --continue from resuming an opencode thread in
+# mimo's session store, or the reverse — the ids would validate either way.
 case "$HARNESS" in
   codex)    SESSION_FILE="$REVIEW_DIR/.review-session" ;;
   grok)     SESSION_FILE="$REVIEW_DIR/.review-session-grok" ;;
   claude)   SESSION_FILE="$REVIEW_DIR/.review-session-claude" ;;
   opencode) SESSION_FILE="$REVIEW_DIR/.review-session-opencode" ;;
+  mimo)     SESSION_FILE="$REVIEW_DIR/.review-session-mimo" ;;
   zai)      SESSION_FILE="$REVIEW_DIR/.review-session-zai" ;;
 esac
 
@@ -283,7 +303,8 @@ cleanup() { rm -f "$OUT" "$DBG"; }
 # Snapshot of the working tree the reviewer must not change. NOTE the limit of
 # what this can police: it covers the git working tree and nothing else. State
 # outside it — credentials (~/.codex/auth.json, ~/.grok, opencode's
-# ~/.local/share/opencode/auth.json), other volumes, the rest of $HOME — is
+# ~/.local/share/opencode/auth.json, mimo's ~/.local/share/mimocode/auth.json),
+# other volumes, the rest of $HOME — is
 # invisible here, so a reviewer that clobbers a login is
 # caught by nobody (observed 2026-07-29: a reviewer ran `codex login
 # --with-api-key` as a "probe" and logged the box out). The prompt above bans
@@ -799,22 +820,34 @@ report_failure_claude() {
 #   report_failure_opencode names the fix for each.
 OPENCODE_REVIEW_PERMS='{"edit":"deny","todowrite":"deny"}'
 
+# The opencode FAMILY extractors: opencode and mimo share them. mimo (Xiaomi's
+# MiMo Code) is an opencode fork whose `run --format json` emits the same
+# stream — {type,timestamp,sessionID,...} per line (mimo 0.1.15 run.ts:439
+# emit), "text" events carrying {part:{id,messageID,text}} once a text part
+# finishes (run.ts:517), "error" events carrying {error:{name,data:{message,
+# statusCode}}} (run.ts:552) — verified in source and against live mimo
+# output 2026-10-01. A divergence in either CLI's stream belongs here, once.
+#
 # Final report = the text parts of the LAST assistant message, joined. Joining
 # (rather than taking only the last part) keeps a report the model split
 # across parts; unique_by drops any re-emitted part update and sorts by part
 # id, which is chronological (ascending ids). fromjson? skips the appended
-# stderr lines.
-extract_opencode_report() {
+# stderr lines. No text parts yields NO output — not "" — because jq -r
+# prints "" as a newline, a 1-byte $OUT that passes every [ -s "$OUT" ]
+# guard: until 1.5.0 opencode's "exited 0 but produced no final message"
+# check could never fire (found while porting it to mimo, 2026-10-01, by
+# a stub run with no text events).
+extract_ocfamily_report() {
   jq -rRs '
     [ split("\n")[] | fromjson? | select(.type=="text") ]
     | unique_by(.part.id)
-    | if length==0 then "" else
+    | if length==0 then empty else
         (.[-1].part.messageID) as $m
         | [ .[] | select(.part.messageID==$m) | .part.text ] | join("\n\n")
       end' "$DBG" 2>/dev/null || true
 }
 
-extract_opencode_session() {
+extract_ocfamily_session() {
   jq -rRs '[ split("\n")[] | fromjson? | .sessionID ] | first // empty' "$DBG" 2>/dev/null || true
 }
 
@@ -832,7 +865,7 @@ run_opencode() {
       ${MODEL:+--model "$MODEL"} "$@" \
       > "$DBG" 2> "$err" || rc=$?
   cat "$err" >> "$DBG" 2>/dev/null; rm -f "$err"
-  extract_opencode_report > "$OUT"
+  extract_ocfamily_report > "$OUT"
   return "$rc"
 }
 
@@ -848,7 +881,7 @@ run_fresh_opencode() {
       echo "  Debug log: $DBG" >&2
       rm -f "$OUT" "$SESSION_FILE"; exit 1
     fi
-    sid=$(extract_opencode_session)
+    sid=$(extract_ocfamily_session)
     # Line 2 records WHO started the thread (see the SESSION_FILE comment).
     [ -n "$sid" ] && printf '%s\n%s\n' "$sid" "$REVIEWER" > "$SESSION_FILE" || rm -f "$SESSION_FILE"
     cat "$OUT"; record_review; cleanup
@@ -911,6 +944,165 @@ report_failure_opencode() {
   fi
 }
 
+# mimo reviewer notes (MiMo Code, Xiaomi's opencode fork; claims verified
+# 2026-10-01 against mimo 0.1.15 — its source and the live binary — unless
+# marked otherwise). It is opencode's runner with one load-bearing difference,
+# the exit code; read run_opencode's notes for the shared rationale.
+# - INDEPENDENCE: mimo defaults to Xiaomi's MiMo models — a genuinely different
+#   family from claude/codex/grok/zai, so a real second opinion when it runs a
+#   xiaomi/* model. But it is a meta-CLI like opencode: -m can point at any
+#   provider, and its login can import Claude Code credentials, so the name
+#   says nothing about the model unless pinned as mimo:<provider/model>.
+# - Same posture as opencode, by mimo's own names: --agent plan (edit denied,
+#   agent/agent.ts:172-204); MIMOCODE_PERMISSION, deep-merged over every
+#   config layer (config.ts:979), with the same edit/todowrite deny;
+#   MIMOCODE_DISABLE_PROJECT_CONFIG=1 (config.ts:821 — the reviewed repo's
+#   .mimocode config/plugins never load); MIMOCODE_DISABLE_AUTOUPDATE=1
+#   (flag.ts:98). Plus MIMOCODE_ENABLE_ANALYSIS=false (flag.ts:107): a review
+#   run has no business POSTing metrics to tracking.miui.com. NOT --pure, for
+#   opencode's reason. The inherited allow-all is stripped in the pre-flight.
+# - The prompt rides stdin (verified live: a piped prompt with no positional
+#   args reached the model). Session ids are opencode's shape (id.ts:88), and
+#   --session <id> resume was accepted live.
+# - EXIT 0 IS NOT SUCCESS. Provider failures arrive as an "error" event on
+#   stdout and mimo still exits 0 (verified live: a 401 "Invalid API Key" and
+#   a 402 "Insufficient account balance", no text parts either time) — where
+#   opencode exits 1. A second exit-0 shape: with no credential the default
+#   free channel throws "MiMo free API service has ended. Sign in or configure
+#   a third-party API." (Provider.getLanguage in the shipped binary — not in
+#   the published source), printed to stderr as an "error:" line, nothing on
+#   stdout, exit 0 (verified live). So mimo_error_event decides, and a built-in
+#   review must also have extracted a report.
+MIMO_REVIEW_PERMS='{"edit":"deny","todowrite":"deny"}'
+
+# The mimo twin of run_opencode — same normalized shape ($DBG = JSONL events
+# then stderr, $OUT = extracted report), same return of the CLI's exit code,
+# which for mimo is necessary-not-sufficient (see above).
+run_mimo() {
+  local err rc=0
+  err=$(mktemp "$REVIEW_DIR/.err.XXXXXX")
+  printf '%s' "$PROMPT" | MIMOCODE_DISABLE_PROJECT_CONFIG=1 MIMOCODE_DISABLE_AUTOUPDATE=1 \
+      MIMOCODE_ENABLE_ANALYSIS=false MIMOCODE_PERMISSION="$MIMO_REVIEW_PERMS" \
+      mimo run --format json --agent plan --title "byre-codereview" \
+      ${MODEL:+--model "$MODEL"} "$@" \
+      > "$DBG" 2> "$err" || rc=$?
+  cat "$err" >> "$DBG" 2>/dev/null; rm -f "$err"
+  extract_ocfamily_report > "$OUT"
+  return "$rc"
+}
+
+# CLI-owned failure text only: the error events' payloads (whole object, so
+# statusCode rides along) and the non-JSON lines of $DBG, which are mimo's
+# stderr. Never the rest of the stream — tool_use events embed reviewer command
+# output, and a review of this very script quotes "402" and "Invalid API Key";
+# grepping all of $DBG would turn any unrelated failure into credential advice
+# (the zai lesson, see codex_family_error_events). fromjson? failing is what
+# marks a stderr line.
+mimo_failure_text() {
+  jq -rRs '
+    split("\n")[] | . as $l | (fromjson? // null) as $j
+    | if $j == null then $l
+      elif ($j | type) == "object" and $j.type == "error" then ($j.error | tojson)
+      else empty end' "$DBG" 2>/dev/null || true
+}
+
+# True when mimo reported a failure that its exit code hid: any "error" event
+# on stdout, or an "error:" line on stderr (the dead-free-tier shape, which
+# emits no event at all). Both are CLI-owned channels, so a model quoting an
+# error in its report cannot trip this.
+mimo_error_event() {
+  jq -eRs '[ split("\n")[] | fromjson? | select(type=="object" and .type=="error") ] | length > 0' \
+    "$DBG" >/dev/null 2>&1 && return 0
+  jq -rRs 'split("\n")[] | select((fromjson? // null) == null)' "$DBG" 2>/dev/null \
+    | grep -qiE '^error:'
+}
+
+run_fresh_mimo() {
+  rm -f "$SESSION_FILE"
+  echo "Running code review (${REVIEWER})${RUN_NOTE} — this may take several minutes..."
+  local rc=0; run_mimo || rc=$?
+  # Success needs all three: exit 0, no error event, and (for built-in
+  # reviews) an extracted report. Raw callers may legitimately want no final
+  # text (codex's rationale), so only they are spared the last condition.
+  if [ "$rc" -eq 0 ] && ! mimo_error_event && { [ "$RAW" = true ] || [ -s "$OUT" ]; }; then
+    sid=$(extract_ocfamily_session)
+    # Line 2 records WHO started the thread (see the SESSION_FILE comment).
+    [ -n "$sid" ] && printf '%s\n%s\n' "$sid" "$REVIEWER" > "$SESSION_FILE" || rm -f "$SESSION_FILE"
+    cat "$OUT"; record_review; cleanup
+  else
+    [ "$rc" -eq 0 ] && echo "byre-codereview: mimo exited 0 but did not review (an error event, an error on stderr, or no final message)." >&2
+    # Partial-output courtesy, as everywhere.
+    [ -s "$OUT" ] && cat "$OUT" >&2
+    report_failure_mimo
+    rm -f "$OUT" "$SESSION_FILE"; exit 1
+  fi
+}
+
+run_resume_mimo() {
+  local sid="$1"
+  # Cross-reviewer resume warning — run_resume_opencode's, for the same reason.
+  local prev; prev=$(sed -n 2p "$SESSION_FILE" 2>/dev/null || true)
+  if [ -n "$prev" ] && [ "$prev" != "$REVIEWER" ]; then
+    echo "byre-codereview: note — resuming a session started by '$prev' as '$REVIEWER':" >&2
+    echo "  the thread's earlier turns are the old model's. For an unprimed opinion" >&2
+    echo "  from '$REVIEWER', run without --continue." >&2
+  fi
+  echo "Continuing previous review session (${REVIEWER}) — this may take several minutes..."
+  local rc=0; run_mimo --session "$sid" || rc=$?
+  if [ "$rc" -eq 0 ] && ! mimo_error_event && [ -s "$OUT" ]; then
+    cat "$OUT"; record_review; cleanup
+  elif [ "$rc" -eq 0 ] && ! mimo_error_event && [ "$RAW" = true ]; then
+    # A raw --continue may end with no final text: keep $DBG, which the notice
+    # points at (the codex/opencode resume handling).
+    echo "(could not extract final message; raw kept at: $DBG)"; rm -f "$OUT"
+  else
+    # A built-in review with no report is a failure here too, not a notice:
+    # exit-0 silence is mimo's failure shape, so it gets the fresh run (whose
+    # own failure path then names the fix).
+    [ -s "$OUT" ] && cat "$OUT" >&2
+    echo "Resume failed — falling back to a fresh review." >&2
+    rm -f "$SESSION_FILE"; run_fresh_mimo
+  fi
+}
+
+# Advice-only, but scoped to mimo_failure_text (CLI-owned text) rather than
+# all of $DBG — see that function. Balance is checked BEFORE auth: a 402 must
+# not fall into a loose auth pattern and send the user to re-login when the
+# fix is funding the account. Patterns were checked against the live bodies
+# (2026-10-01): {"name":"APIError","data":{"message":"Insufficient account
+# balance","statusCode":402,...}} and {"message":"Invalid API Key: Please
+# provide valid API Key","statusCode":401}; and the stderr line
+# "error: MiMo free API service has ended. ...". "Unsupported model <id>" is a
+# 400 (verified); the other model shapes are opencode's, assumed inherited
+# (unverified for mimo).
+report_failure_mimo() {
+  # The CLI's own words first — error-event messages and stderr "error:"
+  # lines — indented; nothing at all when there are none.
+  local errs msgs; errs=$(mimo_failure_text)
+  msgs=$({ jq -rRs '[ split("\n")[] | fromjson? | select(type=="object" and .type=="error")
+                     | (.error.data.message // .error.name) // empty ] | unique | .[]' "$DBG" 2>/dev/null
+           printf '%s\n' "$errs" | grep -iE '^error:'; } | sed '/^$/d' || true)
+  [ -n "$msgs" ] && printf '%s\n' "$msgs" | sed 's/^/  /' >&2
+  if printf '%s' "$errs" | grep -qiE 'insufficient account balance|insufficient_balance|"statusCode":402'; then
+    echo "byre-codereview: mimo's provider refused for lack of funds (402) — the credential works," >&2
+    echo "  but the Xiaomi MiMo platform account has no balance. This is NOT a login problem:" >&2
+    echo "  fund the account at platform.xiaomimimo.com, or pin a model on another provider" >&2
+    echo "  with --reviewer mimo:<provider/model> ('mimo models' lists them)." >&2
+  elif printf '%s' "$errs" | grep -qiE 'free api service has ended|invalid api key|"statusCode":401|unauthorized|authenticat'; then
+    echo "byre-codereview: mimo has no usable MiMo credential (rejected key, or none — the free" >&2
+    echo "  'MiMo Auto' tier has ended, so an unauthenticated mimo cannot review)." >&2
+    echo "  Log in in another terminal: run 'byre shell', then 'mimo auth login -p xiaomi'" >&2
+    echo "  (a paste-code flow — no browser needed in the box). Or forward a platform key" >&2
+    echo "  as XIAOMI_API_KEY in the box's environment." >&2
+  elif printf '%s' "$errs" | grep -qiE 'unsupported model|model not found|does not support tool|no endpoints found'; then
+    echo "byre-codereview: mimo's model can't run the review (unsupported, not found, or no tool use)." >&2
+    echo "  Pass one it can run: --reviewer mimo:<provider/model> ('mimo models' lists them)." >&2
+  else
+    echo "byre-codereview: review failed." >&2
+  fi
+  echo "  Debug log: $DBG" >&2
+}
+
 # Chooses which ADVICE a run that has ALREADY failed prints. Nothing here can
 # discard anything, which is exactly why it may read what the gate must not:
 # a wrong guess costs a wasted glance.
@@ -933,20 +1125,21 @@ report_failure_grok() {
 }
 
 # Session-id validation is per-CLI. codex/zai/grok/claude ids are UUIDs, case-
-# folded here because historical session files vary in case. opencode ids are
-# ses_ + 12 hex + 14 base62 chars and case-SENSITIVE — folding one would
-# corrupt it, so that branch must never share the tr.
+# folded here because historical session files vary in case. opencode and mimo
+# ids are ses_ + 12 hex + 14 base62 chars and case-SENSITIVE (mimo: id.ts:88,
+# live sample ses_ffe5f078b3f48ffe3Asi4Y6Y82) — folding one would corrupt it,
+# so that branch must never share the tr.
 valid_session_id() {
   case "$HARNESS" in
-    opencode) [[ "$1" =~ ^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$ ]] ;;
+    opencode|mimo) [[ "$1" =~ ^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$ ]] ;;
     *) [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] ;;
   esac
 }
 
 if [ "$CONTINUE" = true ] && [ -f "$SESSION_FILE" ]; then
-  # opencode's file is two lines (id, then reviewer string) — only line 1 is
-  # the id; see the SESSION_FILE comment.
-  if [ "$HARNESS" = opencode ]; then sid=$(head -n1 "$SESSION_FILE"); else sid=$(tr '[:upper:]' '[:lower:]' < "$SESSION_FILE"); fi
+  # opencode's and mimo's files are two lines (id, then reviewer string) —
+  # only line 1 is the id; see the SESSION_FILE comment.
+  if [ "$HARNESS" = opencode ] || [ "$HARNESS" = mimo ]; then sid=$(head -n1 "$SESSION_FILE"); else sid=$(tr '[:upper:]' '[:lower:]' < "$SESSION_FILE"); fi
   if valid_session_id "$sid"; then
     "run_resume_$HARNESS" "$sid"
   else

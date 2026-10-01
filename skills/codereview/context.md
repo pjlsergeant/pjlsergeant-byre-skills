@@ -5,7 +5,7 @@ byre placed this guidance here; it applies to every session in this box.
 ## Run a review after each feature or fix
 
 This box ships `byre-codereview` — an independent reviewer (Codex by default;
-`--reviewer grok|claude|opencode|zai` or `BYRE_REVIEWER=...` picks another
+`--reviewer grok|claude|opencode|mimo|zai` or `BYRE_REVIEWER=...` picks another
 installed one). After completing any feature or fix, run it yourself and act
 on the findings; don't ask permission first.
 
@@ -29,11 +29,13 @@ matters, or pin the model yourself with the `harness:model` form:
 
 ```sh
 byre-codereview --reviewer opencode:openrouter/~openai/gpt-latest "..."
+byre-codereview --reviewer mimo:xiaomi/mimo-v2.6-pro "..."
 ```
 
-`opencode models` lists what the box can run. Only opencode consumes a model
-today; the other harnesses reject the colon form rather than silently ignore
-it.
+`opencode models` / `mimo models` list what the box can run. `--reviewer mimo`
+is the same kind of meta-CLI (an opencode fork, see below). Only opencode and
+mimo consume a model; the other harnesses reject the colon form rather than
+silently ignore it.
 
 The loop: run it → read every finding → for each, fix it or note why you're
 leaving it → if you changed anything, re-run with `--continue` → stop only when
@@ -48,7 +50,7 @@ review.
 A **fresh** or **blinded** review means running **without `--continue`** — and
 that is the whole of what those words mean here. `--continue` resumes the
 reviewer's prior session (codex/zai `exec resume`, grok/claude `--resume`,
-opencode `--session`), so the reviewer still has its own earlier findings, and
+opencode/mimo `--session`), so the reviewer still has its own earlier findings, and
 your replies to them, in context. That makes a resumed run a re-read of a conversation it is already
 invested in: it is prone to accept "fixed" at your word and to repeat its own
 framing. Omit the flag and the reviewer starts from an empty context and sees
@@ -93,6 +95,24 @@ flow. It is still interactive, so the same rule applies — the user runs it in
 `byre shell`, never you from a tool call. opencode also needs a tool-capable
 default model (`model` in the global opencode config); the review script names
 that fix when a run fails on it.
+
+### mimo
+
+`mimo` is Xiaomi's MiMo Code, a fork of opencode with the same `run` surface,
+and the review script drives it the same way. By default it runs Xiaomi's MiMo
+models — a genuinely different family from claude/codex/grok/GLM, so a real
+second opinion — but like opencode it can point at any provider (and its login
+can import Claude Code credentials), so pin `mimo:xiaomi/<model>` when
+independence matters.
+
+It needs a credential: the free "MiMo Auto" tier has ended, so a logged-out
+mimo cannot review. The user logs in once with `mimo auth login -p xiaomi` in
+`byre shell` — a paste-code flow (no browser needed), but interactive, so never
+from a tool call — or forwards a platform key as `XIAOMI_API_KEY`. A platform
+account with no balance is refused on every model (402, "Insufficient account
+balance"): the fix is funding the account at platform.xiaomimimo.com, not
+logging in again. mimo reports these failures with exit status 0; the script
+reads its error events instead and names the right fix for each.
 
 ### zai boxes: codex exists, its OpenAI login may not
 
