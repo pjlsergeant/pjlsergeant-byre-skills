@@ -30,10 +30,13 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 byre-codereview -- the independent second-opinion review loop.
 Reviewers: codex (default), grok, claude, opencode, zai (Z.AI/GLM, always
 under its own name -- never a silent codex fallback), and mimo (Xiaomi MiMo
-Code, also takes mimo:<provider/model>).
+Code). Every reviewer takes a model as `<harness>:<model>` (e.g.
+`codex:gpt-5.6-sol`, `claude:opus`, `mimo:xiaomi/mimo-v2.6-pro`), and
+`--timeout <duration>` (or `BYRE_REVIEW_TIMEOUT`) bounds a run: exit 124,
+session kept on a timed-out `--continue`.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.10/skills/codereview/skill.toml --digest sha256:8aacd9434d3555b664922b3690a34d0cb8d1a0d01b8221a124e2564bbf5857be
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.11/skills/codereview/skill.toml --digest sha256:f2f3c9cc9c91947019dc57bf9f68ad9e39a4ff9d106903f1fea6e27bc703f693
 ```
 
 ### pjlsergeant/toolbox

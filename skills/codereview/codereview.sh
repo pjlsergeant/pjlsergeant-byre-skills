@@ -10,10 +10,12 @@
 #   byre-codereview --continue "..."       # re-check after fixes (resumes session)
 #   byre-codereview --reviewer grok "..."  # use grok as the reviewer
 #   byre-codereview --raw "prompt"         # your prompt verbatim, no review prompt
+#   byre-codereview --timeout 10m "..."    # give up (exit 124) after 10 minutes
 #
 # BYRE_REVIEWER sets the default reviewer (codex when unset). A reviewer is
-# "harness" or "harness:model" — see the parsing below; opencode and mimo (an
-# opencode fork) consume a model, the rest reject one.
+# "harness" or "harness:model" — see the parsing below; every harness hands the
+# model to its own CLI's model flag, and a bare harness means that CLI's own
+# default. BYRE_REVIEW_TIMEOUT sets the default --timeout (none when unset).
 #
 # zai is the Z.AI (GLM) Codex wrapper: a reviewer under its OWN name, never a
 # silent fallback for codex. The Running line and reviews.md must say who
@@ -44,24 +46,37 @@ Usage:
   byre-codereview "focus area"           review current changes, focused on a topic
   byre-codereview --continue "..."       re-check after fixes (resumes prior session)
   byre-codereview --reviewer <name> ...  choose the reviewer: codex (default) | grok | claude | opencode | mimo | zai
-                                         opencode also takes a model as opencode:<provider/model>
-                                         (e.g. opencode:openrouter/~openai/gpt-latest), and
-                                         mimo likewise (e.g. mimo:xiaomi/mimo-v2.6-pro)
+                                         alone, the reviewer runs its CLI's own default model;
+                                         <name>:<model> pins one, passed to that CLI as-is:
+                                           codex:gpt-5.6-sol     (no model-list command; a model the
+                                                                 account can't use fails with codex's
+                                                                 own 400, and the script names it)
+                                           zai:glm-4.5
+                                           grok:<model>          ('grok models' lists them)
+                                           claude:opus           (an alias or a full model id)
+                                           opencode:openrouter/~openai/gpt-latest
+                                           mimo:xiaomi/mimo-v2.6-pro
                                          zai reviews through the isolated Z.AI Codex home (GLM)
+  byre-codereview --timeout <duration>   give up after <duration> and exit 124, e.g. --timeout 10m
+                                         (coreutils timeout syntax: 90, 90s, 2.5m, 1h; 0 = none)
   byre-codereview --raw "prompt"         send YOUR prompt verbatim (skips the
                                          built-in review prompt; mechanics stay)
   byre-codereview --raw -- "--anything"  -- ends option parsing, so option-shaped
                                          prompt text passes through
 
-BYRE_REVIEWER sets the default reviewer.
+BYRE_REVIEWER sets the default reviewer; BYRE_REVIEW_TIMEOUT the default --timeout
+(no timeout when unset).
 EOF
 }
 
 REVIEWER="${BYRE_REVIEWER:-codex}"
 CONTINUE=false
 RAW=false
+TIMEOUT="${BYRE_REVIEW_TIMEOUT:-}"
+timeout_flag=false
 FOCUS=()
 expect_reviewer=false
+expect_timeout=false
 ddash=false
 for arg in "$@"; do
   if [ "$ddash" = true ]; then
@@ -73,12 +88,19 @@ for arg in "$@"; do
     expect_reviewer=false
     continue
   fi
+  if [ "$expect_timeout" = true ]; then
+    TIMEOUT="$arg"
+    expect_timeout=false
+    continue
+  fi
   case "$arg" in
     -h|--help) usage; exit 0 ;;
     --continue) CONTINUE=true ;;
     --raw) RAW=true ;;
     --reviewer) expect_reviewer=true ;;
     --reviewer=*) REVIEWER="${arg#--reviewer=}" ;;
+    --timeout) expect_timeout=true; timeout_flag=true ;;
+    --timeout=*) TIMEOUT="${arg#--timeout=}"; timeout_flag=true ;;
     # Everything after -- is prompt text, never an option — the only way an
     # option-shaped prompt ("--help") can reach the reviewer, raw or focused.
     --) ddash=true ;;
@@ -86,8 +108,50 @@ for arg in "$@"; do
   esac
 done
 if [ "$expect_reviewer" = true ]; then
-  echo "byre-codereview: --reviewer needs a value (codex | grok | claude | opencode | mimo | zai)." >&2
+  echo "byre-codereview: --reviewer needs a value: a harness (codex | grok | claude | opencode | mimo | zai)," >&2
+  echo "  optionally with a model as <harness>:<model> (e.g. claude:opus)." >&2
   exit 2
+fi
+if [ "$expect_timeout" = true ]; then
+  echo "byre-codereview: --timeout needs a duration (e.g. --timeout 10m)." >&2
+  exit 2
+fi
+# --timeout takes coreutils timeout(1) syntax — integer or decimal, optional
+# s/m/h/d suffix — checked here so a typo fails in milliseconds with a clear
+# message, not as a cryptic timeout(1) error after the run was announced. An
+# explicit flag is validated even when empty ("--timeout=" is a typo, not a
+# request); an empty BYRE_REVIEW_TIMEOUT just means unset. A zero duration
+# disables timeout(1) itself, so it is normalized to "no timeout" here, where
+# the Running line would otherwise claim a "(timeout: 0)" that never fires —
+# which also makes --timeout 0 the way to override BYRE_REVIEW_TIMEOUT once.
+if [ "$timeout_flag" = true ] || [ -n "$TIMEOUT" ]; then
+  if ! [[ "$TIMEOUT" =~ ^[0-9]+(\.[0-9]+)?[smhd]?$ ]]; then
+    if [ "$timeout_flag" = true ]; then src="--timeout"; else src="BYRE_REVIEW_TIMEOUT"; fi
+    echo "byre-codereview: invalid $src '$TIMEOUT'." >&2
+    echo "  Use coreutils timeout syntax: a number with an optional s/m/h/d suffix, e.g. 600, 10m, 1.5h." >&2
+    exit 2
+  fi
+  [[ "$TIMEOUT" =~ ^0+(\.0+)?[smhd]?$ ]] && TIMEOUT=""
+fi
+if [ -n "$TIMEOUT" ] && ! command -v timeout >/dev/null 2>&1; then
+  echo "byre-codereview: --timeout needs coreutils 'timeout', which is not on PATH." >&2
+  exit 2
+fi
+# The timeout bounds the whole RUN, not each reviewer invocation: a resume
+# that fails late and falls back to a fresh review must not get a second full
+# allowance (found by a codex review of this feature, 2026-10-01 — --timeout
+# 10m could take nearly 20m). So it becomes one absolute DEADLINE, set here,
+# that run_reviewer_cmd counts down to. Whole seconds, rounded UP (awk, since
+# bash has no float arithmetic), so 0.5s is 1s, never 0. Epoch seconds give
+# the deadline ~1s of slack either way; fine for a bound measured in minutes.
+DEADLINE=""
+if [ -n "$TIMEOUT" ]; then
+  case "$TIMEOUT" in
+    *d) mult=86400 ;; *h) mult=3600 ;; *m) mult=60 ;; *) mult=1 ;;
+  esac
+  TIMEOUT_SECS=$(awk -v n="${TIMEOUT%[smhd]}" -v m="$mult" \
+    'BEGIN { x = n * m; i = int(x); if (x > i) i++; print i }')
+  DEADLINE=$(( $(date +%s) + TIMEOUT_SECS ))
 fi
 if [ "$RAW" = true ] && [ "${#FOCUS[@]}" -eq 0 ]; then
   echo "byre-codereview: --raw needs a prompt (the arguments become the whole prompt)." >&2
@@ -99,17 +163,19 @@ fi
 # (model ids may themselves contain slashes, e.g. openrouter/~openai/...).
 # $REVIEWER keeps the full user-given string for display — the Running line
 # and the reviews.md heading show what actually reviewed; $HARNESS drives
-# command lookup, session files, and dispatch. opencode and mimo (the same
-# `run --model` surface — mimo is an opencode fork) consume a model; a harness
-# that got one it can't use must FAIL, not silently review with its default
-# while the log claims otherwise.
+# command lookup, session files, and dispatch. Every harness consumes the
+# model, each through its own CLI's flag (codex/zai/grok -m, claude --model,
+# opencode/mimo --model), on the fresh and resume paths alike. The model is
+# passed through unvalidated: a model the CLI can't run must FAIL from that
+# CLI, never be swapped for its default while the log names the pinned one.
+# A bare harness passes no flag at all, so the CLI's own default applies.
 HARNESS="$REVIEWER"
 MODEL=""
 case "$REVIEWER" in
   *:*)
     HARNESS="${REVIEWER%%:*}"
     MODEL="${REVIEWER#*:}"
-    # "opencode:" (empty model) means no model — same as bare "opencode".
+    # "claude:" (empty model) means no model — same as bare "claude".
     [ -z "$MODEL" ] && REVIEWER="$HARNESS"
     ;;
 esac
@@ -117,7 +183,8 @@ esac
 case "$HARNESS" in
   codex|grok|claude|opencode|mimo|zai) ;;
   *)
-    echo "byre-codereview: unsupported reviewer '$HARNESS' (codex | grok | claude | opencode | mimo | zai)." >&2
+    echo "byre-codereview: unsupported reviewer '$HARNESS' (codex | grok | claude | opencode | mimo | zai," >&2
+    echo "  each optionally as <harness>:<model>, e.g. codex:gpt-5.6-sol)." >&2
     exit 2
     ;;
 esac
@@ -132,14 +199,6 @@ if ! command -v "$HARNESS" >/dev/null 2>&1; then
     fi
   done
   exit 127
-fi
-
-# After the PATH check, so a missing harness is reported as the missing
-# harness it is — not as a model-wiring gap it also happens to have.
-if [ -n "$MODEL" ] && [ "$HARNESS" != opencode ] && [ "$HARNESS" != mimo ]; then
-  echo "byre-codereview: model selection is only wired up for opencode and mimo — '$HARNESS' would silently ignore '$MODEL'." >&2
-  echo "  Run '--reviewer $HARNESS' plain, or extend the $HARNESS runner to consume a model." >&2
-  exit 2
 fi
 
 # zai pre-flight. Two cheap checks BEFORE a run that would otherwise burn
@@ -222,13 +281,17 @@ LOG_FILE="$REVIEW_DIR/reviews.md"
 # Keyed by harness, not by model: a --continue with a different model resumes
 # the same thread (every CLI here applies the model per-prompt, not per-session).
 # That crossing is legitimate — handing a thread to a stronger model is a real
-# move — but it must be VISIBLE, so opencode's file carries the reviewer
-# string on a second line and the resume path warns when it differs (surfaced
-# by a deepseek review of this very feature, 2026-08-08). mimo's file has the
-# same two-line shape for the same reason: it is the other model-taking
-# harness. Its ids are the same shape as opencode's (it is a fork), so the
-# separate file is what keeps --continue from resuming an opencode thread in
-# mimo's session store, or the reverse — the ids would validate either way.
+# move — but it must be VISIBLE. So every harness's file has one shape: line 1
+# the session id, line 2 the reviewer string that started the thread, and
+# every resume path warns (warn_cross_reviewer_resume) when it differs from
+# the resuming one (surfaced for opencode by a deepseek review, 2026-08-08;
+# uniform since every harness takes a model). A one-line file — written before
+# its harness took a model — has no line 2 and resumes silently; only line 1
+# is ever parsed as the id. codex/zai resume also REWRITES the file (see
+# run_resume_codex_family), in the same shape. mimo's ids are the
+# same shape as opencode's (it is a fork), so the separate file is what keeps
+# --continue from resuming an opencode thread in mimo's session store, or the
+# reverse — the ids would validate either way.
 case "$HARNESS" in
   codex)    SESSION_FILE="$REVIEW_DIR/.review-session" ;;
   grok)     SESSION_FILE="$REVIEW_DIR/.review-session-grok" ;;
@@ -238,9 +301,37 @@ case "$HARNESS" in
   zai)      SESSION_FILE="$REVIEW_DIR/.review-session-zai" ;;
 esac
 
+# The reviewer string that started this harness's saved thread (line 2 of the
+# session file; empty for a one-line file or none).
+session_starter() { sed -n 2p "$SESSION_FILE" 2>/dev/null || true; }
+
+# A resume under a different reviewer string feeds the OLD model's thread —
+# its findings, your replies — to the new one while the Running line and the
+# reviews.md heading name only the new one. Legitimate, but never silent.
+# Warn-only, and an absent line 2 (a one-line session file) says nothing.
+# Every run_resume_* calls this first.
+warn_cross_reviewer_resume() {
+  local prev; prev=$(session_starter)
+  if [ -n "$prev" ] && [ "$prev" != "$REVIEWER" ]; then
+    echo "byre-codereview: note — resuming a session started by '$prev' as '$REVIEWER':" >&2
+    echo "  the thread's earlier turns are the old model's. For an unprimed opinion" >&2
+    echo "  from '$REVIEWER', run without --continue." >&2
+  fi
+}
+
+# Every fresh run records its thread the same way (see the SESSION_FILE
+# comment): id, then WHO started it.
+save_session() { printf '%s\n%s\n' "$1" "$REVIEWER" > "$SESSION_FILE"; }
+
 # RUN_NOTE annotates the "Running..." line: raw mode says so instead of echoing
-# the whole prompt back as a "focus".
+# the whole prompt back as a "focus". TIMEOUT_NOTE rides both the Running and
+# Continuing lines, so a caller sees the deadline before the wait starts. Both
+# lines name $REVIEWER — the full user string, model included — for every
+# harness, matching the reviews.md heading.
 if [ "$RAW" = true ]; then RUN_NOTE=" (raw)"; else RUN_NOTE="${FOCUS:+ (focus: ${FOCUS[*]})}"; fi
+TIMEOUT_NOTE="${TIMEOUT:+ (timeout: $TIMEOUT)}"
+announce_fresh()  { echo "Running code review (${REVIEWER})${RUN_NOTE}${TIMEOUT_NOTE} — this may take several minutes..."; }
+announce_resume() { echo "Continuing previous review session (${REVIEWER})${TIMEOUT_NOTE} — this may take several minutes..."; }
 
 read -r -d '' PROMPT <<'EOF' || true
 You are PURELY a code-review agent: you review, the author fixes. Do not modify
@@ -299,6 +390,54 @@ fi
 OUT=$(mktemp "$REVIEW_DIR/.out.XXXXXX")
 DBG=$(mktemp "$REVIEW_DIR/.dbg.XXXXXX")
 cleanup() { rm -f "$OUT" "$DBG"; }
+
+# Every reviewer invocation goes through here, so --timeout covers all six
+# harnesses on fresh and resume paths alike. Each call gets only what is LEFT
+# of the run's DEADLINE (see the parsing above), so a resume and the fresh
+# review it falls back to share one budget — the whole point. With nothing
+# left, the CLI is not started at all: it returns 124 as timeout(1) would, so
+# callers' exit_if_timed_out handles it the same way ($OUT/$DBG stay empty).
+# Env assignments ride `env` inside
+# the call (run_reviewer_cmd env VAR=... cmd) rather than as a `VAR=... cmd`
+# prefix on it, so they unambiguously reach the reviewer itself, not just
+# timeout(1). Default (non --foreground) timeout is deliberate: it puts itself
+# and the command in a fresh process group and signals the WHOLE group on
+# expiry, so a reviewer's spawned probes (a hung git, a repro that never
+# returns) die with it instead of outliving the review. The cost of
+# non-foreground — the child can't read the TTY — is moot: every invocation
+# redirects stdin. -k 15s escalates to KILL if the CLI ignores TERM (exit 137
+# instead of 124). That grace is per invocation, so the worst case is the
+# deadline plus 15s — the fallback can't start a second grace, since a
+# resume that hit the deadline exits rather than falling back.
+run_reviewer_cmd() {
+  [ -n "$DEADLINE" ] || { "$@"; return; }
+  local remaining=$(( DEADLINE - $(date +%s) ))
+  [ "$remaining" -gt 0 ] || return 124
+  timeout -k 15s "${remaining}s" "$@"
+}
+
+# Called FIRST on every failure path, before any other classification: a
+# timed-out run has no meaningful auth/model diagnosis, and a resume that
+# timed out must NOT fall back to a fresh review — the run's deadline has
+# passed, so the fallback could only report the same timeout (or, before the
+# shared deadline, would have doubled the very wait the caller capped). A
+# resume that fails for any OTHER reason still falls back, on whatever is left
+# of the same deadline. 124/137 count only when a timeout was set: without
+# one, 137 is an OOM-kill or similar, and the normal failure path owns it.
+# $1 = the exit status, $2 = fresh|resume. A fresh run drops its session file
+# (as every fresh failure does); a resume keeps it, so a later --continue can
+# retry the same thread. Nothing is appended to reviews.md — failures never
+# are.
+exit_if_timed_out() {
+  [ -n "$TIMEOUT" ] || return 0
+  [ "$1" -eq 124 ] || [ "$1" -eq 137 ] || return 0
+  echo "byre-codereview: review timed out after $TIMEOUT ($REVIEWER)." >&2
+  [ -s "$OUT" ] && cat "$OUT" >&2
+  echo "  Debug log: $DBG" >&2
+  rm -f "$OUT"
+  [ "$2" = fresh ] && rm -f "$SESSION_FILE"
+  exit 124
+}
 
 # Snapshot of the working tree the reviewer must not change. NOTE the limit of
 # what this can police: it covers the git working tree and nothing else. State
@@ -406,7 +545,7 @@ run_fresh_codex_family() {
   # Starting fresh: drop any prior session up front, so an interrupted run can't
   # leave a stale session that a later --continue would wrongly resume.
   rm -f "$SESSION_FILE"
-  echo "Running code review (${HARNESS})${RUN_NOTE} — this may take several minutes..."
+  announce_fresh
   # --sandbox danger-full-access: the BOX is the wall, not codex's own sandbox.
   # Codex sandboxes Linux commands with bundled bwrap, which must create a user
   # namespace — and container runtimes routinely deny that (docker-default
@@ -423,7 +562,10 @@ run_fresh_codex_family() {
   # --skip-git-repo-check: codex refuses non-git dirs by default, but half of
   # what byre boxes isn't a repo, and the BOX is the trust boundary here — the
   # check duplicates an enclosure byre already provides (footgun doctrine).
-  if "$HARNESS" exec --skip-git-repo-check --json --sandbox danger-full-access "$PROMPT" \
+  # -m: the harness:model form's model (codex-cli 0.159.3 `exec` takes
+  # -m/--model, verified 2026-10-01); absent, codex's configured default.
+  if run_reviewer_cmd "$HARNESS" exec --skip-git-repo-check --json --sandbox danger-full-access \
+       ${MODEL:+-m "$MODEL"} "$PROMPT" \
        --output-last-message "$OUT" < /dev/null > "$DBG" 2>&1; then
     # Same empty-output guard as grok and claude: exit 0 with nothing extracted
     # would otherwise print nothing, record nothing, and exit 0 — a silent
@@ -438,9 +580,11 @@ run_fresh_codex_family() {
       rm -f "$OUT" "$SESSION_FILE"; exit 1
     fi
     sid=$(extract_codex_session)
-    [ -n "$sid" ] && [ "$sid" != "null" ] && echo "$sid" > "$SESSION_FILE" || rm -f "$SESSION_FILE"
+    [ -n "$sid" ] && [ "$sid" != "null" ] && save_session "$sid" || rm -f "$SESSION_FILE"
     cat "$OUT"; record_review; cleanup
   else
+    # $? here is the if-condition's status — the reviewer's (or timeout's).
+    exit_if_timed_out "$?" fresh
     "report_failure_$HARNESS"
     rm -f "$OUT" "$SESSION_FILE"; exit 1
   fi
@@ -461,7 +605,24 @@ report_failure_codex() {
   # quotes "token_expired" — any review of auth code — must not turn an
   # unrelated failure into re-login advice.
   local errs; errs=$(codex_family_error_events)
-  if printf '%s' "$errs" | grep -qiE 'token_expired|refresh token|sign in again|authentication token is expired|401 unauthorized'; then
+  # A pinned model the account can't run, checked BEFORE auth so a model
+  # rejection is never sent to re-login. Verified live 2026-10-01 (codex-cli
+  # 0.159.3, ChatGPT login): every gpt-5*-codex name and plain gpt-5 come back
+  # as {"type":"error","status":400,"error":{"type":"invalid_request_error",
+  # "message":"The 'gpt-5' model is not supported when using Codex with a
+  # ChatGPT account."}} — an error event, so in the owned channel above. The
+  # "not found" arm takes a single-token model name on purpose: codex also
+  # emits "Model metadata for `<m>` not found. Defaulting to fallback ..." as
+  # an item.completed warning, outside the owned channel today, and a broader
+  # pattern would turn that harmless warning into model advice if it ever
+  # moved into one.
+  if printf '%s' "$errs" | grep -qiE 'model is not supported|model [^[:space:]]+ not found|unknown model|invalid model'; then
+    echo "byre-codereview: codex rejected the model${MODEL:+ '$MODEL'} — this account can't run it." >&2
+    echo "  Pass one it can: --reviewer codex:<model> (codex has no model-list command;" >&2
+    echo "  the slugs this login can use are in \$CODEX_HOME/models_cache.json, by default" >&2
+    echo "  ~/.codex/models_cache.json), or run bare '--reviewer codex' for its default." >&2
+    echo "  Debug log: $DBG" >&2
+  elif printf '%s' "$errs" | grep -qiE 'token_expired|refresh token|sign in again|authentication token is expired|401 unauthorized'; then
     echo "byre-codereview: codex authentication failed — the login expired or was invalidated." >&2
     echo "  Re-authenticate in another terminal: run 'byre shell', then:" >&2
     echo "      codex-login                  # this package's wrapper, or:" >&2
@@ -544,15 +705,28 @@ report_failure_zai() {
 
 run_resume_codex_family() {
   local sid="$1"
-  echo "Continuing previous review session (${HARNESS}) — this may take several minutes..."
+  warn_cross_reviewer_resume
+  announce_resume
   # The resume subcommand rejects --sandbox ("unexpected argument", clap exit 2
   # — every resume then fell back to a fresh review, silently), but it takes -c
   # overrides, and sandbox_mode is the same knob by its config name (value
   # matches the fresh path's --sandbox; see the rationale there). It DOES
   # accept --output-last-message, so the fresh path's extraction works here too.
-  if "$HARNESS" exec resume --skip-git-repo-check --json -c sandbox_mode="danger-full-access" \
-       "$sid" "$PROMPT" --output-last-message "$OUT" < /dev/null > "$DBG" 2>&1; then
-    new=$(extract_codex_session); [ -n "$new" ] && [ "$new" != "null" ] && echo "$new" > "$SESSION_FILE"
+  # It also takes -m/--model (codex-cli 0.159.3, verified 2026-10-01), so a
+  # resume runs the model the caller named, like every other harness's resume.
+  if run_reviewer_cmd "$HARNESS" exec resume --skip-git-repo-check --json -c sandbox_mode="danger-full-access" \
+       ${MODEL:+-m "$MODEL"} "$sid" "$PROMPT" --output-last-message "$OUT" < /dev/null > "$DBG" 2>&1; then
+    # Unlike the other resumes, this one REWRITES the session file when the
+    # event stream carries a thread id. It keeps the two-line shape and keeps
+    # line 2 as the thread's STARTER, not the resumer — the cross-reviewer
+    # note is about whose turns the thread holds. A one-line file stays one
+    # line rather than guessing who started it.
+    new=$(extract_codex_session)
+    if [ -n "$new" ] && [ "$new" != "null" ]; then
+      starter=$(session_starter)
+      if [ -n "$starter" ]; then printf '%s\n%s\n' "$new" "$starter" > "$SESSION_FILE"
+      else printf '%s\n' "$new" > "$SESSION_FILE"; fi
+    fi
     # No extractable message: keep $DBG — cleanup would delete the very file
     # the notice points at (a raw --continue can legitimately end with no
     # final text, and an extraction failure needs the log even more).
@@ -560,6 +734,7 @@ run_resume_codex_family() {
       echo "(could not extract final message; raw kept at: $DBG)"; rm -f "$OUT"
     fi
   else
+    exit_if_timed_out "$?" resume
     echo "Resume failed — falling back to a fresh review." >&2
     rm -f "$SESSION_FILE"; run_fresh_codex_family
   fi
@@ -642,11 +817,13 @@ grok_not_a_review() {
 
 run_fresh_grok() {
   rm -f "$SESSION_FILE"
-  echo "Running code review (grok)${RUN_NOTE} — this may take several minutes..."
+  announce_fresh
   # -s pre-assigns the session UUID (grok creates it), so --continue can
-  # --resume it later without parsing any output.
+  # --resume it later without parsing any output. -m: the harness:model form's
+  # model (grok 1.0.46 takes -m/--model, verified 2026-10-01).
   local sid; sid=$(cat /proc/sys/kernel/random/uuid)
-  if GROK_SUBAGENTS=0 grok -p "$PROMPT" -s "$sid" --always-approve --disallowed-tools "$GROK_TOOL_STRIP" \
+  if run_reviewer_cmd env GROK_SUBAGENTS=0 grok -p "$PROMPT" -s "$sid" ${MODEL:+-m "$MODEL"} \
+       --always-approve --disallowed-tools "$GROK_TOOL_STRIP" \
        < /dev/null > "$OUT" 2> "$DBG"; then
     # grok can exit 0 having never reviewed: empty output, a startup death, or
     # an auth failure. Each condition here reads a CLI-owned signal only —
@@ -662,9 +839,10 @@ run_fresh_grok() {
       report_failure_grok
       rm -f "$OUT" "$SESSION_FILE"; exit 1
     fi
-    echo "$sid" > "$SESSION_FILE"
+    save_session "$sid"
     cat "$OUT"; record_review; cleanup
   else
+    exit_if_timed_out "$?" fresh
     # Surface whatever partial output exists — same courtesy as the startup
     # path; failure details otherwise vanish with the temp file.
     [ -s "$OUT" ] && cat "$OUT" >&2
@@ -675,11 +853,16 @@ run_fresh_grok() {
 
 run_resume_grok() {
   local sid="$1"
-  echo "Continuing previous review session (grok) — this may take several minutes..."
-  if GROK_SUBAGENTS=0 grok -p "$PROMPT" --resume "$sid" --always-approve --disallowed-tools "$GROK_TOOL_STRIP" \
+  warn_cross_reviewer_resume
+  announce_resume
+  if run_reviewer_cmd env GROK_SUBAGENTS=0 grok -p "$PROMPT" --resume "$sid" ${MODEL:+-m "$MODEL"} \
+       --always-approve --disallowed-tools "$GROK_TOOL_STRIP" \
        < /dev/null > "$OUT" 2> "$DBG" && ! grok_not_a_review; then
     cat "$OUT"; record_review; cleanup
   else
+    # $? is grok's status when grok failed, or 1 from `! grok_not_a_review` —
+    # which can't be mistaken for a timeout.
+    exit_if_timed_out "$?" resume
     # Same partial-output courtesy as the fresh path before the fallback eats it.
     [ -s "$OUT" ] && cat "$OUT" >&2
     echo "Resume failed — falling back to a fresh review." >&2
@@ -707,7 +890,9 @@ run_resume_grok() {
 #   self-contained, so the reviewer loses nothing it needs.
 # - The PROMPT rides stdin: --allowedTools/--disallowedTools are variadic and
 #   swallow a trailing prompt argument (each prompt word became a bogus
-#   permission rule when passed after them).
+#   permission rule when passed after them). For the same reason --model (the
+#   harness:model form's model — an alias like opus/sonnet or a full id;
+#   claude 2.1.286, verified 2026-10-01) goes BEFORE them.
 # - Sessions: --session-id pre-assigns the UUID, like grok's -s; --resume works
 #   headless, repeatedly, against the SAME id. A run that dies early can still
 #   consume its pre-assigned id ("already in use"), which is one more reason
@@ -716,9 +901,10 @@ CLAUDE_TOOL_STRIP="Edit,Write,NotebookEdit,TodoWrite,Task"
 
 run_fresh_claude() {
   rm -f "$SESSION_FILE"
-  echo "Running code review (claude)${RUN_NOTE} — this may take several minutes..."
+  announce_fresh
   local sid; sid=$(cat /proc/sys/kernel/random/uuid)
-  if printf '%s' "$PROMPT" | claude -p --safe-mode --session-id "$sid" \
+  if printf '%s' "$PROMPT" | run_reviewer_cmd claude -p --safe-mode --session-id "$sid" \
+       ${MODEL:+--model "$MODEL"} \
        --allowedTools "Bash" --disallowedTools "$CLAUDE_TOOL_STRIP" \
        > "$OUT" 2> "$DBG"; then
     # Exit 0 with nothing to say has no legitimate reading — never record it
@@ -728,9 +914,10 @@ run_fresh_claude() {
       echo "  Debug log: $DBG" >&2
       rm -f "$OUT" "$SESSION_FILE"; exit 1
     fi
-    echo "$sid" > "$SESSION_FILE"
+    save_session "$sid"
     cat "$OUT"; record_review; cleanup
   else
+    exit_if_timed_out "$?" fresh
     # Surface whatever partial output exists — claude prints some failures
     # (e.g. "Not logged in") to STDOUT, and they'd otherwise vanish with the
     # temp file.
@@ -742,12 +929,15 @@ run_fresh_claude() {
 
 run_resume_claude() {
   local sid="$1"
-  echo "Continuing previous review session (claude) — this may take several minutes..."
-  if printf '%s' "$PROMPT" | claude -p --safe-mode --resume "$sid" \
+  warn_cross_reviewer_resume
+  announce_resume
+  if printf '%s' "$PROMPT" | run_reviewer_cmd claude -p --safe-mode --resume "$sid" \
+       ${MODEL:+--model "$MODEL"} \
        --allowedTools "Bash" --disallowedTools "$CLAUDE_TOOL_STRIP" \
        > "$OUT" 2> "$DBG" && [ -s "$OUT" ]; then
     cat "$OUT"; record_review; cleanup
   else
+    exit_if_timed_out "$?" resume
     # Same partial-output courtesy as the fresh path before the fallback eats it.
     [ -s "$OUT" ] && cat "$OUT" >&2
     echo "Resume failed — falling back to a fresh review." >&2
@@ -757,7 +947,8 @@ run_resume_claude() {
 
 # "Not logged in · Please run /login" arrives on STDOUT with exit 1 (verified),
 # so the auth grep covers $OUT as well as the debug log. Tight patterns only,
-# same rationale as grok's.
+# same rationale as grok's. No model-rejection branch yet (codex and grok have
+# one): claude's wording for a bad --model is unverified — not logged in here.
 report_failure_claude() {
   if grep -qiE 'not logged in|please run /login|oauth token.*(expired|revoked)|invalid api key|401' "$OUT" "$DBG" 2>/dev/null; then
     echo "byre-codereview: claude authentication failed." >&2
@@ -859,7 +1050,7 @@ run_opencode() {
   err=$(mktemp "$REVIEW_DIR/.err.XXXXXX")
   # ${MODEL:+...} adds --model only when the harness:model form supplied one;
   # otherwise the box's opencode config picks, as before.
-  printf '%s' "$PROMPT" | OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_AUTOUPDATE=1 \
+  printf '%s' "$PROMPT" | run_reviewer_cmd env OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_AUTOUPDATE=1 \
       OPENCODE_PERMISSION="$OPENCODE_REVIEW_PERMS" \
       opencode run --format json --agent plan --title "byre-codereview" \
       ${MODEL:+--model "$MODEL"} "$@" \
@@ -871,7 +1062,7 @@ run_opencode() {
 
 run_fresh_opencode() {
   rm -f "$SESSION_FILE"
-  echo "Running code review (${REVIEWER})${RUN_NOTE} — this may take several minutes..."
+  announce_fresh
   if run_opencode; then
     # Same empty-output guard as the others: exit 0 with no final message must
     # not read as a clean review. Raw callers may legitimately want no final
@@ -882,10 +1073,10 @@ run_fresh_opencode() {
       rm -f "$OUT" "$SESSION_FILE"; exit 1
     fi
     sid=$(extract_ocfamily_session)
-    # Line 2 records WHO started the thread (see the SESSION_FILE comment).
-    [ -n "$sid" ] && printf '%s\n%s\n' "$sid" "$REVIEWER" > "$SESSION_FILE" || rm -f "$SESSION_FILE"
+    [ -n "$sid" ] && save_session "$sid" || rm -f "$SESSION_FILE"
     cat "$OUT"; record_review; cleanup
   else
+    exit_if_timed_out "$?" fresh
     # Partial-output courtesy, as everywhere: a report extracted from a failed
     # run still beats a bare log path.
     [ -s "$OUT" ] && cat "$OUT" >&2
@@ -896,17 +1087,8 @@ run_fresh_opencode() {
 
 run_resume_opencode() {
   local sid="$1"
-  # A resume under a different reviewer string feeds the OLD model's thread —
-  # its findings, your replies — to the new one while the Running line and the
-  # reviews.md heading name only the new one. Legitimate, but never silent.
-  # Warn-only, and absent line 2 (a pre-1.3.0 session file) says nothing.
-  local prev; prev=$(sed -n 2p "$SESSION_FILE" 2>/dev/null || true)
-  if [ -n "$prev" ] && [ "$prev" != "$REVIEWER" ]; then
-    echo "byre-codereview: note — resuming a session started by '$prev' as '$REVIEWER':" >&2
-    echo "  the thread's earlier turns are the old model's. For an unprimed opinion" >&2
-    echo "  from '$REVIEWER', run without --continue." >&2
-  fi
-  echo "Continuing previous review session (${REVIEWER}) — this may take several minutes..."
+  warn_cross_reviewer_resume
+  announce_resume
   if run_opencode --session "$sid"; then
     # Same no-message handling as the codex resume: keep $DBG, since the
     # notice points at it and cleanup would delete it.
@@ -914,6 +1096,7 @@ run_resume_opencode() {
       echo "(could not extract final message; raw kept at: $DBG)"; rm -f "$OUT"
     fi
   else
+    exit_if_timed_out "$?" resume
     [ -s "$OUT" ] && cat "$OUT" >&2
     echo "Resume failed — falling back to a fresh review." >&2
     rm -f "$SESSION_FILE"; run_fresh_opencode
@@ -981,7 +1164,7 @@ MIMO_REVIEW_PERMS='{"edit":"deny","todowrite":"deny"}'
 run_mimo() {
   local err rc=0
   err=$(mktemp "$REVIEW_DIR/.err.XXXXXX")
-  printf '%s' "$PROMPT" | MIMOCODE_DISABLE_PROJECT_CONFIG=1 MIMOCODE_DISABLE_AUTOUPDATE=1 \
+  printf '%s' "$PROMPT" | run_reviewer_cmd env MIMOCODE_DISABLE_PROJECT_CONFIG=1 MIMOCODE_DISABLE_AUTOUPDATE=1 \
       MIMOCODE_ENABLE_ANALYSIS=false MIMOCODE_PERMISSION="$MIMO_REVIEW_PERMS" \
       mimo run --format json --agent plan --title "byre-codereview" \
       ${MODEL:+--model "$MODEL"} "$@" \
@@ -1019,15 +1202,15 @@ mimo_error_event() {
 
 run_fresh_mimo() {
   rm -f "$SESSION_FILE"
-  echo "Running code review (${REVIEWER})${RUN_NOTE} — this may take several minutes..."
+  announce_fresh
   local rc=0; run_mimo || rc=$?
+  exit_if_timed_out "$rc" fresh
   # Success needs all three: exit 0, no error event, and (for built-in
   # reviews) an extracted report. Raw callers may legitimately want no final
   # text (codex's rationale), so only they are spared the last condition.
   if [ "$rc" -eq 0 ] && ! mimo_error_event && { [ "$RAW" = true ] || [ -s "$OUT" ]; }; then
     sid=$(extract_ocfamily_session)
-    # Line 2 records WHO started the thread (see the SESSION_FILE comment).
-    [ -n "$sid" ] && printf '%s\n%s\n' "$sid" "$REVIEWER" > "$SESSION_FILE" || rm -f "$SESSION_FILE"
+    [ -n "$sid" ] && save_session "$sid" || rm -f "$SESSION_FILE"
     cat "$OUT"; record_review; cleanup
   else
     [ "$rc" -eq 0 ] && echo "byre-codereview: mimo exited 0 but did not review (an error event, an error on stderr, or no final message)." >&2
@@ -1040,15 +1223,10 @@ run_fresh_mimo() {
 
 run_resume_mimo() {
   local sid="$1"
-  # Cross-reviewer resume warning — run_resume_opencode's, for the same reason.
-  local prev; prev=$(sed -n 2p "$SESSION_FILE" 2>/dev/null || true)
-  if [ -n "$prev" ] && [ "$prev" != "$REVIEWER" ]; then
-    echo "byre-codereview: note — resuming a session started by '$prev' as '$REVIEWER':" >&2
-    echo "  the thread's earlier turns are the old model's. For an unprimed opinion" >&2
-    echo "  from '$REVIEWER', run without --continue." >&2
-  fi
-  echo "Continuing previous review session (${REVIEWER}) — this may take several minutes..."
+  warn_cross_reviewer_resume
+  announce_resume
   local rc=0; run_mimo --session "$sid" || rc=$?
+  exit_if_timed_out "$rc" resume
   if [ "$rc" -eq 0 ] && ! mimo_error_event && [ -s "$OUT" ]; then
     cat "$OUT"; record_review; cleanup
   elif [ "$rc" -eq 0 ] && ! mimo_error_event && [ "$RAW" = true ]; then
@@ -1114,8 +1292,20 @@ report_failure_mimo() {
 # "review failed" and a log path, which is how the original "Not signed in"
 # miss went unnoticed (observed in-box 2026-07-29): the old pattern looked for
 # "not logged in" and "sign in", and "sign in" != "signed in".
+#
+# Model rejection is checked first, so a bad pinned model is never sent to
+# re-login. grok's shape is stderr-only with exit 1 (verified live 2026-10-01,
+# grok 1.0.46): "Couldn't set model 'nonexistent-model': Invalid params:
+# "unknown model id". Run 'grok models' to see available models." — read from
+# $DBG (CLI stderr, a CLI-owned channel), never the $OUT body. Advice only:
+# this pattern must NOT be wired into grok_not_a_review, the discard gate.
 report_failure_grok() {
-  if auth_advice "$DBG" || opens_like_auth "$OUT"; then
+  if grep -qiE "Couldn.t set model|unknown model id" "$DBG" 2>/dev/null; then
+    echo "byre-codereview: grok rejected the model${MODEL:+ '$MODEL'}." >&2
+    echo "  'grok models' lists the ones it can run; pin one with --reviewer grok:<model>," >&2
+    echo "  or run bare '--reviewer grok' for its default." >&2
+    echo "  Debug log: $DBG" >&2
+  elif auth_advice "$DBG" || opens_like_auth "$OUT"; then
     echo "byre-codereview: grok may need re-authentication (its ~6h tokens refresh silently until the chain dies)." >&2
     echo "  Run 'byre shell', then: grok-login (or: grok login --device-auth)" >&2
     echo "  Debug log: $DBG" >&2
@@ -1137,9 +1327,11 @@ valid_session_id() {
 }
 
 if [ "$CONTINUE" = true ] && [ -f "$SESSION_FILE" ]; then
-  # opencode's and mimo's files are two lines (id, then reviewer string) —
-  # only line 1 is the id; see the SESSION_FILE comment.
-  if [ "$HARNESS" = opencode ] || [ "$HARNESS" = mimo ]; then sid=$(head -n1 "$SESSION_FILE"); else sid=$(tr '[:upper:]' '[:lower:]' < "$SESSION_FILE"); fi
+  # Every session file is id, then reviewer string (one line in older files) —
+  # only line 1 is the id; see the SESSION_FILE comment. The UUID harnesses'
+  # ids are case-folded, opencode's/mimo's never (see valid_session_id).
+  if [ "$HARNESS" = opencode ] || [ "$HARNESS" = mimo ]; then sid=$(head -n1 "$SESSION_FILE")
+  else sid=$(head -n1 "$SESSION_FILE" | tr '[:upper:]' '[:lower:]'); fi
   if valid_session_id "$sid"; then
     "run_resume_$HARNESS" "$sid"
   else

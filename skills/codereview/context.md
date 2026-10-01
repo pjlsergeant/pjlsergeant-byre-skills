@@ -15,6 +15,7 @@ byre-codereview "auth error handling" # focus the review
 byre-codereview --continue "..."      # re-check after fixes (resumes the session)
 byre-codereview --reviewer grok "..." # second opinion from grok instead
 byre-codereview --raw "prompt"        # your prompt verbatim (no built-in review prompt)
+byre-codereview --timeout 10m "..."   # give up after 10 minutes (exit 124)
 ```
 
 Prefer a reviewer that ISN'T the model driving this session: same-model review
@@ -30,12 +31,25 @@ matters, or pin the model yourself with the `harness:model` form:
 ```sh
 byre-codereview --reviewer opencode:openrouter/~openai/gpt-latest "..."
 byre-codereview --reviewer mimo:xiaomi/mimo-v2.6-pro "..."
+byre-codereview --reviewer codex:gpt-5.6-sol "..."
+byre-codereview --reviewer zai:glm-4.5 "..."
+byre-codereview --reviewer grok:<model> "..."   # `grok models` lists them
+byre-codereview --reviewer claude:opus "..."    # an alias or a full model id
 ```
 
 `opencode models` / `mimo models` list what the box can run. `--reviewer mimo`
-is the same kind of meta-CLI (an opencode fork, see below). Only opencode and
-mimo consume a model; the other harnesses reject the colon form rather than
-silently ignore it.
+is the same kind of meta-CLI (an opencode fork, see below). Every harness
+passes the model to its own CLI; a bare harness runs that CLI's own default.
+A model the CLI can't run fails from the CLI — nothing is silently
+substituted. A `--continue` under a different model resumes the same thread,
+and the script notes the crossing.
+
+`--timeout <duration>` (or `BYRE_REVIEW_TIMEOUT`; coreutils syntax: `600`,
+`10m`, `1.5h`) stops the reviewer and its probes after that long and exits 124
+with a "timed out" message; nothing is logged. A timed-out `--continue` keeps
+its session, so you can simply retry. If your tool call has its own time
+limit, set a timeout a bit under it, so the script reports cleanly instead of
+being killed mid-flight.
 
 The loop: run it → read every finding → for each, fix it or note why you're
 leaving it → if you changed anything, re-run with `--continue` → stop only when
