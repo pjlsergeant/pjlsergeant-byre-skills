@@ -1,13 +1,13 @@
 [package]
 id = "pjlsergeant/codereview"
-version = "1.6.0"
+version = "1.7.0"
 kind = "skill"
 package_api = 1
 requires_byre = ">=0.1.10"
 description = "byre-codereview — the independent second-opinion review loop."
 
 [build]
-apt = ["jq"] # codereview.sh parses codex --json and opencode --format json output with jq
+apt = ["jq"] # codereview.sh parses codex --json and opencode/mimo --format json output with jq
 files = { "codereview.sh" = "/usr/local/bin/byre-codereview", "devlog-lib.sh" = "/usr/local/lib/byre-devlog-lib.sh", "codex-login.sh" = "/usr/local/bin/codex-login", "grok-login.sh" = "/usr/local/bin/grok-login" }
 # The login helpers are deliberately UNPREFIXED: they wrap the vendors' own
 # CLIs, so `codex-login` reads as "log codex in" rather than as byre machinery.
@@ -20,7 +20,7 @@ file = "context.md"
 [[package.files]]
 src = "codereview.sh"
 dest = "codereview.sh"
-sha256 = "a88932e4212aafc436b539f4161d2361624ee18d96439d16aa675b4d7c2a8298"
+sha256 = "20c840ed2fbc43b8535bc3c4668ace7a04f6b88f73624479589840b5c9ccb01f"
 
 [[package.files]]
 src = "codex-login.sh"
@@ -30,7 +30,7 @@ sha256 = "d5386ac892850a8d16ac52d99df0fe1a82f8a4bfb9730e5cf456b884d0b433e2"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "d07b403e13375668535ce4e17e2bb7b44d57dd74572b5fb0547611142743047d"
+sha256 = "c81d4f9818e0c0033c1b9dce3fa78401099710f6fd7ee3fda83ac0d83e5f3722"
 
 [[package.files]]
 src = "devlog-lib.sh"

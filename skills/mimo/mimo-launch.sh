@@ -66,6 +66,38 @@ MIMOCODE_CONFIG_CONTENT=$(printf '%s' "$base" \
       | ((.instructions // []) | if type == "string" then [.] elif type != "array" then [] else . end) as $ins
       | .instructions = ($ins + (if ($ins | index($ctx)) then [] else [$ctx] end))
       | if .mcp == {} then del(.mcp) else . end')
+
+# The box's default model, from byre-mimo-model (installed beside this
+# adapter; see its header): MIMO_MODEL when set, else -- for a Token Plan
+# (tp-) key -- the regional xiaomi-token-plan-<region>/<model> it detects by
+# probing (cached per project in mimo's data dir), else nothing. This is
+# what makes a bare Token Plan key work with NO configuration: such a key is
+# valid only on its region's provider and 401s on mimo's default xiaomi/*
+# (verified live 2026-10-01). MIMO_MODEL still overrides. Folded in as
+# top-level `model` ("provider/model", config.ts schema -- the same key `-m`
+# overrides per run). Why here and not the global
+# ~/.config/mimocode/mimocode.jsonc: that file is image-layer in a byre box
+# and resets on rebuild; env and the data-dir cache survive. Precedence:
+# the resolver > a `model` already in a pre-set MIMOCODE_CONFIG_CONTENT >
+# the global config (this layer deep-merges after global, config.ts:890).
+# It is a DEFAULT, not a lock (source-verified 2026-10-01, mimo 0.1.15): an
+# explicit `-m` beats it everywhere; in the TUI the last model picked there
+# (recent, in the image-layer ~/.local/state/mimocode/model.json) beats it
+# too (cli/cmd/tui/util/model.ts:48), until a rebuild clears that file;
+# `mimo run` takes it first (Provider.defaultModel,
+# provider/provider.ts:1913). An id the registry doesn't list is NOT an
+# error there: mimo log.warns and falls through to its own default.
+# The resolver never fails a launch (it prints nothing and warns instead);
+# the `|| model=` covers a missing or broken copy all the same. Looked up
+# beside this script first (both live in /usr/local/bin in a box, and side
+# by side in the skill's source dir), then on PATH.
+resolver="$(dirname -- "$0")/byre-mimo-model"
+[ -x "$resolver" ] || resolver=byre-mimo-model
+model=$("$resolver") || model=
+if [ -n "$model" ]; then
+  MIMOCODE_CONFIG_CONTENT=$(printf '%s' "$MIMOCODE_CONFIG_CONTENT" \
+    | jq -c --arg m "$model" '.model = $m')
+fi
 export MIMOCODE_CONFIG_CONTENT
 
 exec mimo "$@"

@@ -1,0 +1,141 @@
+#!/bin/bash
+# byre-mimo-model [-q] [--no-cache] -- print the ONE `provider/model` this
+# box's mimo should run, or nothing (exit 0) when it has no opinion and
+# mimo's own default applies. The one-line "what will this box run"
+# diagnostic, and the single resolver behind byre-mimo-launch (the agent)
+# and byre-codereview's bare `--reviewer mimo` (the reviewer), so the two
+# can never disagree.
+#
+#   -q          no stderr (the reviewer's pre-flight: its own failure report
+#               explains a 401 better than this line would)
+#   --no-cache  skip the cache read and probe now (the cache is still
+#               refreshed); mimo-shared-auth's first-run detection uses it
+#
+# Order:
+#  1. MIMO_MODEL, when set: printed as-is. Shape check only, deliberately
+#     loose (a `/` with text on both sides -- model ids may carry more
+#     slashes); a malformed value prints nothing plus one warning rather than
+#     bricking every launch. It is an override: it wins over detection.
+#  2. A Token Plan key (XIAOMI_API_KEY starting `tp-`): such a key is valid
+#     only on ONE regional provider xiaomi-token-plan-{cn,ams,sgp} (api
+#     https://token-plan-<region>.xiaomimimo.com/v1, all reading
+#     XIAOMI_API_KEY) and answers 401 "Invalid API Key" on mimo's default
+#     `xiaomi` provider and the other regions (verified live 2026-10-01). The
+#     region is discoverable: GET /v1/models answers 200
+#     {"object":"list","data":[{"id":...}]} on the right host and 401
+#     elsewhere (verified live 2026-10-01, sgp). So probe all three in
+#     parallel (8s cap each, so a launch waits at most ~8s, once) and accept
+#     exactly one 200 carrying a `data` array. Model: mimo-v2.6-pro when
+#     listed, else the first id that isn't a tts/asr model.
+#     Cache: ${XDG_DATA_HOME:-~/.local/share}/mimocode/byre-token-plan, i.e.
+#     mimo's DATA dir -- the per-project .mimocode state volume in a byre
+#     box, so one probe per project survives rebuilds. Line: `<keyid>
+#     <region> <model>`; keyid = first 16 hex of sha256(key), never the key,
+#     so a rotated key misses and re-probes. Written 0600 under umask 077,
+#     temp + rename; a symlinked dir or file disables the cache entirely
+#     (neither read nor written through).
+#     Zero or several 200s, network failure, or no curl/jq: nothing printed,
+#     one stderr line, exit 0 -- never a blocked launch.
+#  3. Anything else (no key, a platform key, a login): nothing; mimo's own
+#     defaults apply.
+#
+# The key never reaches argv: the Authorization header goes to curl on
+# stdin (`-H @-`, curl >= 7.55; Debian bookworm ships 7.88), so `ps` in the
+# box does not show it.
+set -u
+
+quiet= nocache=
+for arg in "$@"; do
+  case "$arg" in
+    -q) quiet=1 ;;
+    --no-cache) nocache=1 ;;
+    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "byre-mimo-model: unknown argument '$arg' (usage: byre-mimo-model [-q] [--no-cache])" >&2; exit 2 ;;
+  esac
+done
+warn() { [ -n "$quiet" ] || echo "byre-mimo-model: $*" >&2; }
+
+# 1. The override.
+if [ -n "${MIMO_MODEL:-}" ]; then
+  case "$MIMO_MODEL" in
+    ?*/?*) printf '%s\n' "$MIMO_MODEL" ;;
+    *) warn "ignoring MIMO_MODEL='$MIMO_MODEL' (expected provider/model, e.g. xiaomi-token-plan-sgp/mimo-v2.6-pro)" ;;
+  esac
+  exit 0
+fi
+
+# 3. (early) Not a Token Plan key: no opinion.
+key=${XIAOMI_API_KEY:-}
+case "$key" in tp-*) ;; *) exit 0 ;; esac
+
+fail() { warn "could not resolve the Token Plan region ($1); set MIMO_MODEL"; exit 0; }
+for tool in curl jq sha256sum; do
+  command -v "$tool" >/dev/null 2>&1 || fail "$tool not installed"
+done
+
+keyid=$(printf '%s' "$key" | sha256sum | cut -c1-16)
+dir=${XDG_DATA_HOME:-$HOME/.local/share}/mimocode
+cache=$dir/byre-token-plan
+usable_cache=1
+{ [ -L "$dir" ] || [ -L "$cache" ]; } && usable_cache=
+
+# 2a. Cache. Fields are validated, so a hand-edited or corrupt line is a miss.
+if [ -n "$usable_cache" ] && [ -z "$nocache" ] && [ -f "$cache" ]; then
+  read -r c_id c_region c_model _ < "$cache" 2>/dev/null || true
+  if [ "${c_id:-}" = "$keyid" ]; then
+    case "${c_region:-}" in
+      cn|ams|sgp)
+        case "${c_model:-}" in
+          ''|*[!A-Za-z0-9._-]*) ;;
+          *) printf 'xiaomi-token-plan-%s/%s\n' "$c_region" "$c_model"; exit 0 ;;
+        esac ;;
+    esac
+  fi
+fi
+
+# 2b. Probe all three regions in parallel.
+tmp=$(mktemp -d) || fail "no temp dir"
+trap 'rm -rf -- "$tmp"' EXIT
+for r in cn ams sgp; do
+  (
+    printf 'Authorization: Bearer %s\n' "$key" \
+      | curl -fsS -m 8 -H @- "https://token-plan-$r.xiaomimimo.com/v1/models" >"$tmp/$r" 2>/dev/null
+    echo $? >"$tmp/$r.rc"
+  ) &
+done
+wait
+
+hits= refused=0
+for r in cn ams sgp; do
+  rc=$(cat "$tmp/$r.rc" 2>/dev/null)
+  if [ "$rc" = 0 ] && jq -e '.data | type == "array"' "$tmp/$r" >/dev/null 2>&1; then
+    hits="$hits $r"
+  elif [ "$rc" = 22 ]; then
+    refused=$((refused + 1)) # curl -f: an HTTP >= 400 answer
+  fi
+done
+set -- $hits
+case $# in
+  1) region=$1 ;;
+  0) if [ "$refused" = 3 ]; then fail "every region refused the key"; else fail "a region was unreachable and none accepted the key"; fi ;;
+  *) fail "several regions accepted the key:$hits" ;;
+esac
+
+model=$(jq -r '[.data[]?.id | strings] as $ids
+  | if any($ids[]; . == "mimo-v2.6-pro") then "mimo-v2.6-pro"
+    else ([$ids[] | select(test("tts|asr"; "i") | not)][0] // empty) end' "$tmp/$region")
+case "$model" in
+  ''|*[!A-Za-z0-9._-]*) fail "token-plan-$region lists no usable model" ;;
+esac
+
+# Cache write: best effort -- a failure costs only a re-probe next launch.
+if [ -n "$usable_cache" ]; then
+  (
+    umask 077
+    mkdir -p "$dir" 2>/dev/null && [ -d "$dir" ] && [ ! -L "$dir" ] || exit 0
+    t=$(mktemp "$dir/.byre-token-plan.XXXXXX" 2>/dev/null) || exit 0
+    if printf '%s %s %s\n' "$keyid" "$region" "$model" >"$t" && chmod 0600 "$t" \
+       && mv -fT -- "$t" "$cache" 2>/dev/null; then :; else rm -f -- "$t"; fi
+  )
+fi
+printf 'xiaomi-token-plan-%s/%s\n' "$region" "$model"

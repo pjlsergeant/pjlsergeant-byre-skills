@@ -23,8 +23,9 @@ cred="$data_root/mimocode/auth.json"
 # writes a fresh regular file a planted link can't redirect (mimo writes
 # auth.json IN PLACE, chmod 0600, no temp+rename --
 # packages/shared/src/filesystem.ts:80 -- so a login would write THROUGH a
-# link). There is no mimo shared-auth companion yet, hence no trusted
-# identity-dir exception as in the opencode hook.
+# link). No trusted identity-dir exception as in the opencode hook:
+# pjlsergeant/mimo-shared-auth exports XIAOMI_API_KEY through env.d and
+# never symlinks auth.json, so any link here is foreign.
 if [ -L "$cred" ]; then
   rm -f "$cred"
   echo "byre: removed a symlinked mimo credential ($cred); log in again to store a regular file." >&2
@@ -32,6 +33,27 @@ fi
 # A static key in the environment makes the file login unnecessary: the
 # models.dev catalog's env name for provider `xiaomi` (verified live).
 [ -n "${XIAOMI_API_KEY:-}" ] && exit 0
+# pjlsergeant/mimo-shared-auth's stored key counts too. Checked by FILE, not
+# env: byre sources env.d hooks AFTER every firstrun hook (byre-launch, the
+# "Launch env hooks" loop follows the firstrun loop), so its XIAOMI_API_KEY
+# export does not exist yet here -- without this, a box with a shared key
+# would be offered the paste-code login every launch. Same predicate as that
+# companion's env.sh (non-symlink regular file in a non-symlink dir, non-empty
+# AFTER `tr -d '[:space:]'` -- a bare -s would stand down on a whitespace-only
+# file that env.sh exports nothing from, leaving no credential and no login;
+# 2026-10-02 mimo review), and its 00-firstrun hook has already run, so a key
+# pasted this launch counts. A
+# stand-down only, so the env-derived base (its test seam) trusts nothing:
+# the worst a hostile BYRE_IDENTITY_BASE can do is skip a prompt. A
+# symlinked identity DIR counts as nothing stored, matching env.sh -- which
+# would export nothing through it, so standing down would leave the box
+# with no credential and no login offered (2026-10-02 codex review).
+shared_dir="${BYRE_IDENTITY_BASE:-/home/dev/.byre-identity}/mimo"
+shared_key="$shared_dir/api-key"
+if [ ! -L "$shared_dir" ] && [ -f "$shared_key" ] && [ ! -L "$shared_key" ] && [ -s "$shared_key" ] \
+  && [ -n "$(tr -d '[:space:]' < "$shared_key" 2>/dev/null)" ]; then
+  exit 0
+fi
 # Already authenticated? There is no `login status` probe, so the guard is
 # a shape sniff (the opencode/grok precedent): auth.json is a provider-keyed
 # map whose entries all carry a "type" member ({"type":"api","key":...}),
@@ -56,7 +78,8 @@ trap 'echo; echo "byre: mimo login skipped. To do it later, open another termina
 echo ""
 echo "=== byre: first-run MiMo Code login ==="
 echo "Open the URL below, sign in to the Xiaomi MiMo platform, and paste the code back here."
-echo "Stored per-project, survives rebuilds. Ctrl-C to skip (or set XIAOMI_API_KEY instead)."
+echo "Stored per-project, survives rebuilds. Ctrl-C to skip (or set XIAOMI_API_KEY instead,"
+echo "or enable pjlsergeant/mimo-shared-auth to share one key across projects)."
 echo "Note: the free MiMo channel has ended; the account needs a balance (otherwise requests answer 402)."
 echo ""
 # Bound the wait; --foreground keeps mimo in the terminal's foreground

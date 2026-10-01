@@ -1,16 +1,19 @@
-# Evidence status (2026-10-01): the BINARY's behavior was verified live
-# against mimo 0.1.15 (the npm linux-x64 artifact, run outside byre): the
-# XDG state split (`mimo debug paths`), the paste-code `mimo auth login -p
-# xiaomi` flow, the XIAOMI_API_KEY env key, and the dead free channel. The
-# runtime knobs below are SOURCE-verified against the XiaomiMiMo/MiMo-Code
-# tree (refs inline). NOT exercised: the image build itself (no docker in
-# the authoring box -- the download RUN was simulated in bash against a temp
-# prefix instead), the arm64 artifact beyond its registry checksum, and a
-# real byre box resolving the injected MCP servers (`mimo mcp list`).
+# Evidence status. LIVE-verified against the mimo 0.1.15 binary (the npm
+# linux-x64 artifact, run outside byre, 2026-10-01): the XDG state split
+# (`mimo debug paths`), the paste-code `mimo auth login -p xiaomi` flow, the
+# XIAOMI_API_KEY env key, the dead free channel; and byre-mimo-model
+# (2026-10-02) with a real tp- key (sgp detected, cache written and hit,
+# MIMO_MODEL override, bogus key), end to end through mimo-launch.sh and
+# `mimo run`. SOURCE-verified against the XiaomiMiMo/MiMo-Code tree (refs
+# inline): the runtime knobs below. NOT exercised: the image build (no docker
+# in the authoring box; the download RUN was simulated in bash against a temp
+# prefix), the arm64 artifact beyond its registry checksum, a byre box
+# resolving the injected MCP servers (`mimo mcp list`), and the region probes
+# through byre's egress firewall.
 
 [package]
 id = "pjlsergeant/mimo"
-version = "1.0.0"
+version = "1.1.0"
 kind = "skill"
 package_api = 1
 requires_byre = ">=1.3.0"
@@ -18,16 +21,23 @@ description = "The MiMo Code agent (Xiaomi's MIT-licensed opencode fork, binary 
 
 [build]
 # jq: the launch adapter builds MIMOCODE_CONFIG_CONTENT from the baked
-# /etc/byre/mcp.json with it. curl + ca-certificates: the pinned download.
+# /etc/byre/mcp.json with it, and byre-mimo-model parses the Token Plan
+# /v1/models answer. curl + ca-certificates: the pinned download, and
+# byre-mimo-model's region probe.
 apt = ["curl", "ca-certificates", "jq"]
 # mimo-login.sh: first-run auth hook (paste-code Xiaomi platform login,
 # guarded by auth.json / XIAOMI_API_KEY; skippable with Ctrl-C).
 # mimo-launch.sh: the agent launch adapter -- MCP + context injection via
 # MIMOCODE_CONFIG_CONTENT, then exec mimo (port of byre's opencode adapter).
+# byre-mimo-model: the model resolver both the adapter and byre-codereview's
+# bare `--reviewer mimo` call -- MIMO_MODEL, else a Token Plan key's region
+# detected by probing the three token-plan hosts (cached in the data
+# volume), else nothing. Installed beside the adapter, which looks there
+# first.
 # Payload COPYs land before this block's RUN lines; a fetched payload
 # carries no exec bit, hence the chmod (firstrun hooks run as `bash "$hook"`
 # so the hook needs none).
-files = { "mimo-login.sh" = "/etc/byre/firstrun.d/mimo-login", "mimo-launch.sh" = "/usr/local/bin/byre-mimo-launch" }
+files = { "mimo-login.sh" = "/etc/byre/firstrun.d/mimo-login", "mimo-launch.sh" = "/usr/local/bin/byre-mimo-launch", "byre-mimo-model" = "/usr/local/bin/byre-mimo-model" }
 dockerfile = [
   # Pre-create ~/.local's XDG tree AS THE DEV USER (byre's opencode skill
   # precedent): the state volume targets /home/dev/.local/share/mimocode,
@@ -58,7 +68,7 @@ dockerfile = [
   " && rm -rf /tmp/mimo",
   # Fail the BUILD loudly if the tarball layout ever moves.
   "RUN test -x /usr/local/bin/mimo",
-  "RUN chmod 0755 /usr/local/bin/byre-mimo-launch",
+  "RUN chmod 0755 /usr/local/bin/byre-mimo-launch /usr/local/bin/byre-mimo-model",
 ]
 
 [runtime]
@@ -70,19 +80,37 @@ dockerfile = [
 # env-key provider detection XIAOMI_API_KEY relies on (flag.ts:230).
 env = { MIMOCODE_DISABLE_AUTOUPDATE = "true", MIMOCODE_ENABLE_ANALYSIS = "false" }
 # byre holds each env_docs value to one line, <=300 bytes; the longer
-# guidance lives in context.md. The env name is the models.dev catalog's
-# for provider `xiaomi` (verified live: the key is accepted).
-env_docs.XIAOMI_API_KEY = "Xiaomi MiMo platform API key, optional alternative to the paste-code login. A credential: `byre credentials set XIAOMI_API_KEY` or env_from_host, never a baked [env] literal. When set, the first-run login hook stands down."
+# guidance lives in context.md. XIAOMI_API_KEY is the models.dev name for
+# provider `xiaomi` and the Token Plan providers xiaomi-token-plan-
+# {cn,ams,sgp} alike. A tp- key 401s on `xiaomi`, but byre-mimo-model routes
+# it: GET /v1/models answers 200 only on the key's own region (all verified
+# live 2026-10-01, sgp), so a Token Plan box needs the key and nothing else.
+env_docs.XIAOMI_API_KEY = "Xiaomi MiMo API key, alternative to the paste-code login; set via byre credentials or env_from_host, never [env]. Stands the login hook down. A Token Plan key (tp-) is detected and routed to its regional provider automatically."
+# MIMO_MODEL is read by byre-mimo-model, which both mimo-launch.sh (folded
+# into MIMOCODE_CONFIG_CONTENT as `model`) and byre-codereview's bare
+# `--reviewer mimo` call. Not a secret: a plain [env] literal is fine, or
+# pjlsergeant/mimo-shared-auth's file.
+env_docs.MIMO_MODEL = "Optional override of the mimo agent's and a bare --reviewer mimo's model, as provider/model, e.g. xiaomi-token-plan-sgp/mimo-v2.6-pro. Plain [env] value, not a secret. Token Plan (tp-) keys are detected automatically; run byre-mimo-model to see the model in use."
 # Egress (443). api.xiaomimimo.com = inference; platform.xiaomimimo.com =
 # the OAuth authorize page + code callback of `mimo auth login -p xiaomi`;
 # models.dev = the provider/model catalog (functional, as for byre's
-# opencode skill). A login whose result carries a custom base_url needs
-# that host opened via the project config's egress.
+# opencode skill). token-plan-{cn,ams,sgp}.xiaomimimo.com = the inference
+# hosts of the regional Token Plan providers (api
+# https://token-plan-<region>.xiaomimimo.com/v1, per models.dev; the sgp one
+# verified live 2026-10-01 with a tp- key) -- the skill's own functional
+# endpoints for a Token Plan account, so open with the skill like
+# api.xiaomimimo.com. All three rather than the user's one: the region is
+# not known at install time -- byre-mimo-model finds it by probing all
+# three (GET /v1/models with the key), so all three must be reachable for a
+# tp- key to work with no configuration. They carry only Xiaomi inference,
+# the same trust as api.xiaomimimo.com.
+# A login whose result carries a custom base_url needs that host opened via
+# the project config's egress.
 # Deliberately closed: tracking.miui.com (analytics, also disabled by env),
 # mimocode.cnbj1.mi-fds.com (self-update), registry.npmjs.org (mimo's
 # background `@mimo-ai/plugin` install per config dir, config.ts ~866 --
 # it warns and continues).
-egress = ["api.xiaomimimo.com", "platform.xiaomimimo.com", "models.dev"]
+egress = ["api.xiaomimimo.com", "platform.xiaomimimo.com", "models.dev", "token-plan-cn.xiaomimimo.com", "token-plan-ams.xiaomimimo.com", "token-plan-sgp.xiaomimimo.com"]
 # mimo.xiaomi.com = install script / update check / config $schema. Not
 # needed to run; offered as a switch, ships closed.
 egress_offered = ["mimo.xiaomi.com"]
@@ -105,8 +133,10 @@ mcp = "inject"
 context = "inject"
 state = ".mimocode"
 
-# No host-seeded auth and no shared-auth companion (yet): log in per box via
-# the firstrun hook; the .mimocode volume persists auth.json across rebuilds.
+# No host-seeded auth: log in per box via the firstrun hook (the .mimocode
+# volume persists auth.json across rebuilds), or enable the optional
+# pjlsergeant/mimo-shared-auth companion, which exports XIAOMI_API_KEY and
+# MIMO_MODEL from a machine-scoped identity volume.
 
 [[volumes]]
 name = ".mimocode"
@@ -120,17 +150,23 @@ target = "/home/dev/.local/share/mimocode"
 
 # Distribution payload list -- generated by `byre skill pack`.
 [[package.files]]
+src = "byre-mimo-model"
+dest = "byre-mimo-model"
+sha256 = "b92578c0f1e1655db9234b752ce235a3a36575fc4d4a34f8f9d535b0135cec64"
+executable = true
+
+[[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "60a1bae04ba8edc0b8f9251c139e414b0b793edc911f5e667f7d94f863a2d89f"
+sha256 = "a8ef04462c6a3e60eaf852c9c60fb931c2bc963b103996bf148ad3ba45933de5"
 
 [[package.files]]
 src = "mimo-launch.sh"
 dest = "mimo-launch.sh"
-sha256 = "a26c1334c439c91e53d8f4003fb05b5d35f45b36440f20d3645948635db5bd17"
+sha256 = "f2abdc1bf4265dce094f35d9ea8ad880f034cf915ec81270548bedf24894380a"
 
 [[package.files]]
 src = "mimo-login.sh"
 dest = "mimo-login.sh"
-sha256 = "7a4884396890feda0126579c3fe6e41340e043b3adc4e1d8e4a0692f380dd079"
+sha256 = "be3f591adec44eb7784755598821511d7ffa70b598893b974d27a871c21b9317"
 

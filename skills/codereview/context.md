@@ -39,7 +39,9 @@ byre-codereview --reviewer claude:opus "..."    # an alias or a full model id
 
 `opencode models` / `mimo models` list what the box can run. `--reviewer mimo`
 is the same kind of meta-CLI (an opencode fork, see below). Every harness
-passes the model to its own CLI; a bare harness runs that CLI's own default.
+passes the model to its own CLI; a bare harness runs that CLI's own default,
+except bare `mimo`, which runs what `byre-mimo-model` resolves for the box
+(`MIMO_MODEL`, or a Token Plan key's detected region) and names it.
 A model the CLI can't run fails from the CLI — nothing is silently
 substituted. A `--continue` under a different model resumes the same thread,
 and the script notes the crossing.
@@ -57,7 +59,7 @@ clean or all remaining items are consciously deferred. Findings are also
 appended to `.byre-devlog/reviews.md`. Reviewers may run cheap read-only probes
 to back up findings but never your test suite — green stays YOUR job — and must
 not touch the tree; the script warns if the working tree changed during a
-review.
+review (Python byte-code caches from a reviewer's probes are suppressed).
 
 ### Fresh / blinded runs
 
@@ -116,8 +118,9 @@ that fix when a run fails on it.
 and the review script drives it the same way. By default it runs Xiaomi's MiMo
 models — a genuinely different family from claude/codex/grok/GLM, so a real
 second opinion — but like opencode it can point at any provider (and its login
-can import Claude Code credentials), so pin `mimo:xiaomi/<model>` when
-independence matters.
+can import Claude Code credentials), so when independence matters, pin a
+Xiaomi model (`mimo:xiaomi/<model>`, or a Token Plan provider's) rather than
+trusting the box's default.
 
 It needs a credential: the free "MiMo Auto" tier has ended, so a logged-out
 mimo cannot review. The user logs in once with `mimo auth login -p xiaomi` in
@@ -127,6 +130,29 @@ account with no balance is refused on every model (402, "Insufficient account
 balance"): the fix is funding the account at platform.xiaomimimo.com, not
 logging in again. mimo reports these failures with exit status 0; the script
 reads its error events instead and names the right fix for each.
+
+A Xiaomi **Token Plan** key (it starts `tp-`) works only on its regional
+provider, `xiaomi-token-plan-cn`, `-ams` or `-sgp`; on mimo's default `xiaomi`
+provider the same valid key is rejected with 401 "Invalid API Key". Routing
+is automatic: `byre-mimo-model` (installed by the mimo skill) detects the
+key's region and caches it per project, a bare `--reviewer mimo` runs that,
+and the Running line names it (`mimo:xiaomi-token-plan-sgp/mimo-v2.6-pro`).
+`MIMO_MODEL` overrides detection, and an explicit `mimo:<provider/model>` pin
+beats both. If `byre-mimo-model` prints nothing for a `tp-` key, the region
+could not be resolved (`byre-mimo-model --no-cache` says why — usually a bad
+key), and the review 401s on the default provider. Don't set `model` in
+`~/.config/mimocode/mimocode.jsonc`: that file is image-layer in a byre box
+and resets on rebuild.
+
+The mimo reviewer runs its own read-only agent, `byre-review`, which the
+script defines for each run: a reviewer persona with every edit tool denied,
+paths outside the repo denied, and mimo's memory writing off. It is not mimo's
+`plan` agent, which always writes a plan file into the repo's
+`.mimocode/plans/` whatever the prompt says, and not `build`, whose coding
+persona kept trying to write scratch files outside the repo; mimo cut those
+reviews off with no report. mimo's scheduler is switched off
+for the review too, since it would leave a lock file in `.mimocode/`. A
+review should leave `git status` exactly as it found it.
 
 ### zai boxes: codex exists, its OpenAI login may not
 

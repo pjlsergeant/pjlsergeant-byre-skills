@@ -56,6 +56,10 @@ Usage:
                                            claude:opus           (an alias or a full model id)
                                            opencode:openrouter/~openai/gpt-latest
                                            mimo:xiaomi/mimo-v2.6-pro
+                                           mimo:xiaomi-token-plan-sgp/mimo-v2.6-pro  (a Token Plan
+                                                                 tp- key: pin its region's provider)
+                                         bare mimo instead pins what byre-mimo-model resolves
+                                         (MIMO_MODEL, or a Token Plan key's region) and names it
                                          zai reviews through the isolated Z.AI Codex home (GLM)
   byre-codereview --timeout <duration>   give up after <duration> and exit 124, e.g. --timeout 10m
                                          (coreutils timeout syntax: 90, 90s, 2.5m, 1h; 0 = none)
@@ -242,17 +246,45 @@ if [ "$HARNESS" = codex ]; then
   fi
 fi
 
-# mimo pre-flight. The pjlsergeant/mimo agent skill launches the AUTHORING
-# agent with MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS set, and byre-codereview runs
-# as that agent's child, so the reviewer would inherit it. In mimo 0.1.15 that
-# flag merges an allow-all base UNDER every config layer (config.ts:972,
-# verified in source 2026-10-01): explicit denies — ours included — still win,
-# but every "ask" becomes an allow, so the external_directory ask that confines
-# a headless reviewer to the repo would silently open. The reviewer must start
-# from mimo's own defaults, like zai's ZAI_CODEX_BIN strip above. Unconditional
-# and silent: a reviewer has no legitimate use for it.
+# mimo pre-flight. Two inherited variables go, unconditionally and silently,
+# so the reviewer starts from mimo's own defaults (the idea of the zai strip
+# above). MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS: pjlsergeant/mimo launches the
+# authoring agent with it, and this script runs as that agent's child. In
+# mimo 0.1.15 it merges an allow-all base under every config layer
+# (config.ts:972, source 2026-10-01): explicit denies still win, but every
+# "ask" becomes an allow, silently lifting the external_directory ask that
+# confines a headless reviewer to the repo. MIMOCODE_CONFIG_CONTENT:
+# byre-mimo-launch exports it carrying the author's MCP servers and baked
+# context as `instructions`, a config layer to mimo (config.ts:890), so an
+# inherited copy would prime the reviewer with the author's context and
+# tools. mimo already scrubs it from children its tools spawn
+# (util/credential-env.ts, effect/cross-spawn-spawner.ts:112; live
+# 2026-10-01, mimo 0.1.15's bash tool saw it unset); the unset covers every
+# other route. The box's ~/.config/mimocode config and auth still load.
+# MIMOCODE_AUTH_CONTENT stays: credentials, not context, so stripping it
+# could only turn a working review into an auth failure.
+# A bare `--reviewer mimo` then pins what byre-mimo-model resolves
+# (pjlsergeant/mimo's resolver: MIMO_MODEL when set, else a Token Plan key's
+# probed region, cached per project, else nothing). byre-mimo-launch makes
+# that mimo's default only through the MIMOCODE_CONFIG_CONTENT just unset,
+# and a reviewer runs plain `mimo`, so it must ask the resolver itself; on a
+# Token Plan box that is the only provider the tp- key can use. $REVIEWER is
+# read at call time by announce_*/record_review/save_session, so the Running
+# line, the reviews.md heading and session-file line 2 name the resolved
+# model as they would a typed pin, which already set MODEL and wins. No
+# resolver on PATH: mimo's own default. -q: an unresolved region stays quiet
+# here because report_failure_mimo explains the 401 it causes (a malformed
+# MIMO_MODEL, dropped by the resolver, runs as bare `mimo`). `|| true`: the
+# resolver exits 0 on every path it knows, but set -e must not end a review
+# on a broken copy. A bad value fails from mimo, under its own name.
 if [ "$HARNESS" = mimo ]; then
-  unset MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS
+  unset MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS MIMOCODE_CONFIG_CONTENT
+  if [ -z "$MODEL" ] && command -v byre-mimo-model >/dev/null 2>&1; then
+    MODEL=$(byre-mimo-model -q) || true
+    if [ -n "$MODEL" ]; then
+      REVIEWER="mimo:$MODEL"
+    fi
+  fi
 fi
 
 # Persisted artifacts live in .byre-devlog/ at the repo root — a self-ignoring
@@ -468,6 +500,14 @@ tree_state() {
 # one-line legibility note, not machinery.
 command -v sha256sum >/dev/null 2>&1 \
   || echo "byre-codereview: note — sha256sum missing, the tree tripwire is disabled." >&2
+# Every harness, before any reviewer runs (their children inherit it): a
+# reviewer may legitimately import the code under review to verify a
+# finding, and the byte-code cache that leaves (__pycache__/, untracked
+# unless the repo ignores it) is a tree write that is nobody's finding --
+# observed live 2026-10-02, a reviewer's `python3 -c "import calc"` fired
+# this tripwire. Only Python honours it; other toolchains' caches are not
+# covered (unverified whether any reviewer probe has tripped one).
+export PYTHONDONTWRITEBYTECODE=1
 PRE_STATE=$(tree_state)
 # The observe-don't-mutate tripwire. A warning, not a rollback: byre's job is
 # to make the violation legible, the human decides what to do with it. Fires
@@ -1023,23 +1063,31 @@ OPENCODE_REVIEW_PERMS='{"edit":"deny","todowrite":"deny"}'
 # (rather than taking only the last part) keeps a report the model split
 # across parts; unique_by drops any re-emitted part update and sorts by part
 # id, which is chronological (ascending ids). fromjson? skips the appended
-# stderr lines. No text parts yields NO output — not "" — because jq -r
-# prints "" as a newline, a 1-byte $OUT that passes every [ -s "$OUT" ]
-# guard: until 1.5.0 opencode's "exited 0 but produced no final message"
-# check could never fire (found while porting it to mimo, 2026-10-01, by
-# a stub run with no text events).
+# stderr lines. Three cases yield NO output, not "", because jq -r prints ""
+# as a newline: a 1-byte $OUT that passes every [ -s "$OUT" ] guard, so
+# before this fix opencode's "exited 0 but produced no final message" check
+# could never fire. No text events at all. Text that is empty or
+# whitespace-only: --format json emits the "text" event BEFORE the CLI's own
+# blank check (mimo run.ts:517-519, opencode's twin), so the final select
+# drops a joined report with no non-whitespace character. A non-string text
+# (object/array): coerced to "", since join would abort jq and, via the
+# `|| true`, blank the whole report, good parts of the same message included
+# (found by a mimo review, 2026-10-01).
 extract_ocfamily_report() {
   jq -rRs '
-    [ split("\n")[] | fromjson? | select(.type=="text") ]
+    [ split("\n")[] | fromjson? | select(type=="object" and .type=="text") ]
     | unique_by(.part.id)
     | if length==0 then empty else
         (.[-1].part.messageID) as $m
-        | [ .[] | select(.part.messageID==$m) | .part.text ] | join("\n\n")
+        | [ .[] | select(.part.messageID==$m) | (.part.text | if type=="string" then . else "" end) ] | join("\n\n")
+        | select(test("\\S"))
       end' "$DBG" 2>/dev/null || true
 }
 
+# objects only: a stderr line that happens to parse as a JSON scalar (a bare
+# number) would otherwise make .sessionID abort the whole jq program.
 extract_ocfamily_session() {
-  jq -rRs '[ split("\n")[] | fromjson? | .sessionID ] | first // empty' "$DBG" 2>/dev/null || true
+  jq -rRs '[ split("\n")[] | fromjson? | objects | .sessionID // empty ] | first // empty' "$DBG" 2>/dev/null || true
 }
 
 # Runs opencode and normalizes its two streams into the usual shape: $DBG =
@@ -1128,45 +1176,127 @@ report_failure_opencode() {
 }
 
 # mimo reviewer notes (MiMo Code, Xiaomi's opencode fork; claims verified
-# 2026-10-01 against mimo 0.1.15 — its source and the live binary — unless
-# marked otherwise). It is opencode's runner with one load-bearing difference,
-# the exit code; read run_opencode's notes for the shared rationale.
-# - INDEPENDENCE: mimo defaults to Xiaomi's MiMo models — a genuinely different
-#   family from claude/codex/grok/zai, so a real second opinion when it runs a
-#   xiaomi/* model. But it is a meta-CLI like opencode: -m can point at any
-#   provider, and its login can import Claude Code credentials, so the name
-#   says nothing about the model unless pinned as mimo:<provider/model>.
-# - Same posture as opencode, by mimo's own names: --agent plan (edit denied,
-#   agent/agent.ts:172-204); MIMOCODE_PERMISSION, deep-merged over every
-#   config layer (config.ts:979), with the same edit/todowrite deny;
-#   MIMOCODE_DISABLE_PROJECT_CONFIG=1 (config.ts:821 — the reviewed repo's
-#   .mimocode config/plugins never load); MIMOCODE_DISABLE_AUTOUPDATE=1
-#   (flag.ts:98). Plus MIMOCODE_ENABLE_ANALYSIS=false (flag.ts:107): a review
-#   run has no business POSTing metrics to tracking.miui.com. NOT --pure, for
-#   opencode's reason. The inherited allow-all is stripped in the pre-flight.
-# - The prompt rides stdin (verified live: a piped prompt with no positional
-#   args reached the model). Session ids are opencode's shape (id.ts:88), and
-#   --session <id> resume was accepted live.
+# 2026-10-01 against mimo 0.1.15, source and live binary, unless marked
+# otherwise). It is opencode's runner with two load-bearing differences, the
+# agent and the exit code; run_opencode's notes carry the shared rationale.
+# - INDEPENDENCE: mimo defaults to Xiaomi's MiMo models, a genuinely different
+#   family from claude/codex/grok/zai. But it is a meta-CLI like opencode: -m
+#   can point at any provider and its login can import Claude Code
+#   credentials, so the name says nothing about the model unless pinned.
+# - POSTURE, by mimo's own names: MIMOCODE_PERMISSION, deep-merged over every
+#   config layer (config.ts:979), with opencode's edit/todowrite deny;
+#   MIMOCODE_DISABLE_PROJECT_CONFIG=1 (config.ts:821: the repo's .mimocode
+#   config/plugins never load); MIMOCODE_DISABLE_AUTOUPDATE=1 (flag.ts:98);
+#   MIMOCODE_ENABLE_ANALYSIS=false (flag.ts:107: no metrics to
+#   tracking.miui.com). NOT --pure, for opencode's reason.
+# - AGENT: the review runs its own primary agent, byre-review, defined in a
+#   MIMOCODE_CONFIG_CONTENT built by mimo_review_config (below) and exported
+#   only into mimo's env, after the pre-flight dropped any inherited copy.
+#   Not plan: its hardPermission re-allows edits to .mimocode/plans/*.md after
+#   every user/config/session rule (agent/agent.ts:200, runtimePermission at
+#   :89, last via findLast), and its reminder, which "supersedes any other
+#   instructions", has the model write <worktree>/.mimocode/plans/<ts>-<slug>.md
+#   (session/prompt.ts:1624-1660, session.ts:378). Verified live 2026-10-01:
+#   told not to modify files, with edit denied for .mimocode/** in both
+#   MIMOCODE_PERMISSION and the plan agent's config, it wrote the file anyway.
+#   Not build: its general coding persona reaches for scratch files outside
+#   the repo, an external_directory ASK that headless `run` auto-rejects
+#   (run.ts:556-573); the RejectedError BLOCKS the session loop
+#   (session/processor.ts:439, ctx.shouldBreak from :861), so mimo ends the
+#   turn, exit 0, no report. Live A/B 2026-10-01, same planted bug: build 0/2
+#   usable, byre-review 4/4. byre-review, from source:
+#   - a cfg.agent entry with no built-in of its name gets merge(defaults,
+#     user), the user layer carrying MIMOCODE_PERMISSION, then its own
+#     `permission` (agent/agent.ts:429-459); last match wins
+#     (permission/evaluate.ts:11), so its rules beat the belt and the belt
+#     covers what they leave unsaid. No hardPermission, no plan reminder.
+#   - `run --agent` finds config agents via Agent.get (run.ts:628); mode must
+#     not be "subagent" (run.ts:637), hence "primary". An unknown name only
+#     prints `! agent "<name>" not found. Falling back to default agent` and
+#     reviews under build, so mimo_error_event fails that line (verified live
+#     2026-10-01 by misspelling it).
+#   - `prompt` REPLACES the built-in base prompt (session/system.ts:54, first
+#     in session/llm.ts:320-328; environment, instructions and skills still
+#     follow), so the persona below is the whole identity.
+#   - external_directory {"*":"deny"} makes the out-of-tree ask a rule deny:
+#     a DeniedError (permission/index.ts:262), returned to the model as the
+#     tool's error text, not a loop breaker. mimo re-allows its truncation and
+#     skill dirs after config (agent.ts:462). bash_delete deny does the same
+#     for the forced-ask `rm` confirmation.
+#   - experimental.continue_loop_on_deny=true (config.ts:395, read only at
+#     processor.ts:861/1040) is the general belt: any OTHER auto-rejected ask
+#     (a .env read, doom_loop) reaches the model instead of ending the review.
+#   - memory.disable_write=true: memory writes skip both the edit ask and
+#     external_directory (tool/external-directory.ts:38,155) and land in
+#     mimo's data dir for a later review to find; this stops them and the
+#     memory injection (config.ts:339-343, memory/write-gate.ts).
+#   The persona is not enforcement: 2 of the 4 A/B runs still wrote probe
+#   inputs to /tmp by redirection, which mimo's bash scan (path arguments
+#   only, tool/bash.ts:73,627) does not see. Harmless outside the tree.
+#   bash stays, as for every harness, so free-form writes remain possible,
+#   which is the tripwire's job; `run` denies question and plan_exit itself
+#   (run.ts:368). No `steps` cap: the schema has one (config/agent.ts:56) but
+#   it forces a text-only answer mid-investigation; --timeout bounds a run.
+# - MIMOCODE_EXPERIMENTAL_CRON=false: the scheduler is on by default
+#   (flag.ts:394) and at a session's first prompt writes .mimocode/.cron-lock
+#   and a self-ignoring .gitignore into the cwd (cron/cron-lock.ts:18,207;
+#   session/prompt.ts:4710). This flag keeps the bridge from starting
+#   (cron-bridge.ts:130); MIMOCODE_DISABLE_CRON does not, as the lock comes
+#   before any tick (verified live 2026-10-01). The other .gitignore writer
+#   (config.ts:856) needs project config (config/paths.ts:30), which is off.
+# - The prompt rides stdin and --session <id> resumes (both verified live);
+#   session ids are opencode's shape (id.ts:88).
 # - EXIT 0 IS NOT SUCCESS. Provider failures arrive as an "error" event on
-#   stdout and mimo still exits 0 (verified live: a 401 "Invalid API Key" and
-#   a 402 "Insufficient account balance", no text parts either time) — where
-#   opencode exits 1. A second exit-0 shape: with no credential the default
-#   free channel throws "MiMo free API service has ended. Sign in or configure
-#   a third-party API." (Provider.getLanguage in the shipped binary — not in
-#   the published source), printed to stderr as an "error:" line, nothing on
-#   stdout, exit 0 (verified live). So mimo_error_event decides, and a built-in
-#   review must also have extracted a report.
+#   stdout with exit 0 (verified live: a 401 "Invalid API Key" and a 402
+#   "Insufficient account balance"), where opencode exits 1. With no
+#   credential the dead free channel prints "error: MiMo free API service has
+#   ended. ..." to stderr only (Provider.getLanguage, in the shipped binary,
+#   not the published source), exit 0 (verified live). So mimo_error_event
+#   decides, and a built-in review must also have extracted a report.
+# - Token Plan (tp-) keys 401 on the default `xiaomi` provider and work only
+#   on their region's xiaomi-token-plan-* (verified live 2026-10-01). The
+#   pre-flight comment owns how a bare `--reviewer mimo` routes them.
 MIMO_REVIEW_PERMS='{"edit":"deny","todowrite":"deny"}'
+MIMO_REVIEW_AGENT=byre-review
+MIMO_REVIEW_PERSONA='You are a read-only code reviewer. You review; the author fixes.
+
+You have NO ability to create, modify or delete files anywhere: not in the repository, not in /tmp or any scratch location, not in your own config or memory directories. Every write tool is disabled, paths outside the repository are denied, and attempts only waste your turn. Never try to write a file, scratch note, plan or patch, by any tool or by shell redirection.
+
+Do all of your analysis in your reply. You may run read-only commands through bash: git status/diff/log/show, reading or grepping files, --help output, and small one-line probes whose output you read directly. Keep all intermediate notes in your own reasoning, never on disk.
+
+When a tool call is refused, do not retry it or work around it: continue the review with what you have.
+
+Finish with your full report as your final message, ending with a "Probes run:" section listing every command you ran beyond the basic git reads ("none" if none).'
+
+# The MIMOCODE_CONFIG_CONTENT for the review (see the notes above for every
+# key). Built with jq so the persona needs no hand-escaping. No model here:
+# the model rides --model (an explicit pin or byre-mimo-model's answer), so
+# a review the resolver has no opinion on keeps mimo's own default.
+mimo_review_config() {
+  jq -cn --arg agent "$MIMO_REVIEW_AGENT" --arg prompt "$MIMO_REVIEW_PERSONA" '{
+    experimental: { continue_loop_on_deny: true },
+    memory: { disable_write: true },
+    agent: { ($agent): {
+      mode: "primary",
+      description: "byre-codereview read-only reviewer",
+      prompt: $prompt,
+      permission: { edit: "deny", todowrite: "deny", bash_delete: "deny",
+                    external_directory: { "*": "deny" } } } } }'
+}
 
 # The mimo twin of run_opencode — same normalized shape ($DBG = JSONL events
 # then stderr, $OUT = extracted report), same return of the CLI's exit code,
-# which for mimo is necessary-not-sufficient (see above).
+# which for mimo is necessary-not-sufficient (see above). The resume path
+# passes the same agent and config: --session continues the thread under
+# whatever agent this run names.
 run_mimo() {
-  local err rc=0
+  local err rc=0 cfg
   err=$(mktemp "$REVIEW_DIR/.err.XXXXXX")
+  cfg=$(mimo_review_config)
   printf '%s' "$PROMPT" | run_reviewer_cmd env MIMOCODE_DISABLE_PROJECT_CONFIG=1 MIMOCODE_DISABLE_AUTOUPDATE=1 \
-      MIMOCODE_ENABLE_ANALYSIS=false MIMOCODE_PERMISSION="$MIMO_REVIEW_PERMS" \
-      mimo run --format json --agent plan --title "byre-codereview" \
+      MIMOCODE_ENABLE_ANALYSIS=false MIMOCODE_EXPERIMENTAL_CRON=false MIMOCODE_PERMISSION="$MIMO_REVIEW_PERMS" \
+      MIMOCODE_CONFIG_CONTENT="$cfg" \
+      mimo run --format json --agent "$MIMO_REVIEW_AGENT" --title "byre-codereview" \
       ${MODEL:+--model "$MODEL"} "$@" \
       > "$DBG" 2> "$err" || rc=$?
   cat "$err" >> "$DBG" 2>/dev/null; rm -f "$err"
@@ -1179,26 +1309,49 @@ run_mimo() {
 # stderr. Never the rest of the stream — tool_use events embed reviewer command
 # output, and a review of this very script quotes "402" and "Invalid API Key";
 # grepping all of $DBG would turn any unrelated failure into credential advice
-# (the zai lesson, see codex_family_error_events). fromjson? failing is what
-# marks a stderr line.
+# (the zai lesson, see codex_family_error_events). A line FAILING to parse is
+# what marks a stderr line — tested as an empty [fromjson?], not as a null
+# result, since a stderr line that parses (a bare "false" or "null") is still
+# not an event, and `fromjson? // null` would also have treated the JSON
+# literals false/null as unparsed (found by a mimo review of 1.6.0,
+# 2026-10-01). Such parseable-but-not-object lines are neither stderr text
+# nor events: dropped.
 mimo_failure_text() {
   jq -rRs '
-    split("\n")[] | . as $l | (fromjson? // null) as $j
-    | if $j == null then $l
-      elif ($j | type) == "object" and $j.type == "error" then ($j.error | tojson)
+    split("\n")[] | . as $l | [fromjson?] as $j
+    | if ($j | length) == 0 then $l
+      elif ($j[0] | type) == "object" and $j[0].type == "error" then ($j[0].error | tojson)
       else empty end' "$DBG" 2>/dev/null || true
 }
 
-# True when mimo reported a failure that its exit code hid: any "error" event
-# on stdout, or an "error:" line on stderr (the dead-free-tier shape, which
-# emits no event at all). Both are CLI-owned channels, so a model quoting an
-# error in its report cannot trip this.
+# True when mimo reported a failure its exit code hid: an "error" event on
+# stdout; an "error:" line on stderr (the dead free tier, which emits no
+# event); or the agent-fallback line (`! agent "<name>" not found. Falling
+# back to default agent`, or "is a subagent"; run.ts:628-645), after which
+# mimo reviews under build, without byre-review's persona and denies, and
+# exits 0 with a report. All three are CLI-owned: under --format json tool
+# output never reaches mimo's own stderr (verified live 2026-10-01, mimo
+# 0.1.15: a probe's "error: probe-marker" came back inside its tool_use
+# event), so neither a probe nor a report quoting an error can trip this.
+# The fallback line is ANSI-coloured, placement unverified, so strip_ansi runs
+# first and the match is unanchored; case-insensitive here and in
+# report_failure_mimo alike, so gate and advice agree. `grep >/dev/null`, not
+# -q: under pipefail an early -q exit SIGPIPEs jq/sed, the pipeline returns
+# 141, and `! mimo_error_event` reads that as "no error" (reproduced
+# 2026-10-02: one fallback line + ~200 KB of filler).
 mimo_error_event() {
   jq -eRs '[ split("\n")[] | fromjson? | select(type=="object" and .type=="error") ] | length > 0' \
     "$DBG" >/dev/null 2>&1 && return 0
-  jq -rRs 'split("\n")[] | select((fromjson? // null) == null)' "$DBG" 2>/dev/null \
-    | grep -qiE '^error:'
+  jq -rRs 'split("\n")[] | select([fromjson?] | length == 0)' "$DBG" 2>/dev/null \
+    | strip_ansi | grep -iE "^error:|$MIMO_AGENT_FALLBACK_RE" >/dev/null
 }
+
+# SGR colour sequences (ESC [ params m) out of a text stream. \x1b in a sed
+# regex is a GNU sed extension -- fine here, the box is Debian (GNU sed);
+# POSIX sed would read it as a literal "x1b".
+strip_ansi() { sed 's/\x1b\[[0-9;]*m//g'; }
+# mimo's agent-fallback line, shared by the gate and the advice (both -i).
+MIMO_AGENT_FALLBACK_RE='agent "[^"]*" (not found|is a subagent)'
 
 run_fresh_mimo() {
   rm -f "$SESSION_FILE"
@@ -1243,16 +1396,22 @@ run_resume_mimo() {
   fi
 }
 
-# Advice-only, but scoped to mimo_failure_text (CLI-owned text) rather than
-# all of $DBG — see that function. Balance is checked BEFORE auth: a 402 must
-# not fall into a loose auth pattern and send the user to re-login when the
-# fix is funding the account. Patterns were checked against the live bodies
-# (2026-10-01): {"name":"APIError","data":{"message":"Insufficient account
-# balance","statusCode":402,...}} and {"message":"Invalid API Key: Please
-# provide valid API Key","statusCode":401}; and the stderr line
-# "error: MiMo free API service has ended. ...". "Unsupported model <id>" is a
-# 400 (verified); the other model shapes are opencode's, assumed inherited
-# (unverified for mimo).
+# Advice-only, scoped to mimo_failure_text (CLI-owned text), not all of $DBG.
+# Order: the agent fallback first (not a credential or model problem), then
+# balance BEFORE auth, so a 402 is never sent to re-login, then auth, then
+# model. Patterns match the live bodies (2026-10-01): {"name":"APIError",
+# "data":{"message":"Insufficient account balance","statusCode":402,...}},
+# {"message":"Invalid API Key: Please provide valid API Key","statusCode":401}
+# and "error: MiMo free API service has ended. ..."; "Unsupported model <id>"
+# is a verified 400, the other model shapes opencode's, assumed inherited.
+# The 401 lead depends on $MODEL: with a pin (typed, or resolved by the
+# pre-flight) the provider refused that pin; without one, the region could
+# not be resolved. The Token Plan hint is appended either way: a tp- key on
+# the wrong provider gives exactly the bad-key body (verified live
+# 2026-10-01), and the script cannot see which kind of key the box holds.
+# The box-wide fix is MIMO_MODEL, not "model" in mimocode.jsonc (image-layer
+# in a byre box, reset on rebuild). No egress advice: pjlsergeant/mimo opens
+# the three token-plan hosts itself.
 report_failure_mimo() {
   # The CLI's own words first — error-event messages and stderr "error:"
   # lines — indented; nothing at all when there are none.
@@ -1261,18 +1420,42 @@ report_failure_mimo() {
                      | (.error.data.message // .error.name) // empty ] | unique | .[]' "$DBG" 2>/dev/null
            printf '%s\n' "$errs" | grep -iE '^error:'; } | sed '/^$/d' || true)
   [ -n "$msgs" ] && printf '%s\n' "$msgs" | sed 's/^/  /' >&2
-  if printf '%s' "$errs" | grep -qiE 'insufficient account balance|insufficient_balance|"statusCode":402'; then
+  # grep >/dev/null, not -q, in every branch here: the same SIGPIPE-under-
+  # pipefail hole as mimo_error_event (an early -q exit kills printf/sed with
+  # 141, read as "no match"). Advisory only, but it keeps gate and advice
+  # agreeing on the same $DBG.
+  if printf '%s' "$errs" | strip_ansi | grep -iE "$MIMO_AGENT_FALLBACK_RE" >/dev/null; then
+    # Not a credential or model problem, so none of the advice below fits.
+    echo "byre-codereview: mimo did not load the '$MIMO_REVIEW_AGENT' review agent and fell back to its" >&2
+    echo "  default agent, so the review was discarded. The agent is defined in the" >&2
+    echo "  MIMOCODE_CONFIG_CONTENT this script passes; a mimo that rejects that config or" >&2
+    echo "  changed its agent schema does this." >&2
+  elif printf '%s' "$errs" | grep -iE 'insufficient account balance|insufficient_balance|"statusCode":402' >/dev/null; then
     echo "byre-codereview: mimo's provider refused for lack of funds (402) — the credential works," >&2
     echo "  but the Xiaomi MiMo platform account has no balance. This is NOT a login problem:" >&2
     echo "  fund the account at platform.xiaomimimo.com, or pin a model on another provider" >&2
     echo "  with --reviewer mimo:<provider/model> ('mimo models' lists them)." >&2
-  elif printf '%s' "$errs" | grep -qiE 'free api service has ended|invalid api key|"statusCode":401|unauthorized|authenticat'; then
+  elif printf '%s' "$errs" | grep -iE 'free api service has ended|invalid api key|"statusCode":401|unauthorized|authenticat' >/dev/null; then
     echo "byre-codereview: mimo has no usable MiMo credential (rejected key, or none — the free" >&2
     echo "  'MiMo Auto' tier has ended, so an unauthenticated mimo cannot review)." >&2
     echo "  Log in in another terminal: run 'byre shell', then 'mimo auth login -p xiaomi'" >&2
     echo "  (a paste-code flow — no browser needed in the box). Or forward a platform key" >&2
     echo "  as XIAOMI_API_KEY in the box's environment." >&2
-  elif printf '%s' "$errs" | grep -qiE 'unsupported model|model not found|does not support tool|no endpoints found'; then
+    # The Token Plan hint follows whatever the key kind (see the header); a
+    # pinned $MODEL would make "could not be resolved" false, so lead with it.
+    if [ -n "$MODEL" ]; then
+      echo "  mimo's provider refused the pinned model '$MODEL' (401): a bad or expired key, or a" >&2
+      echo "  Token Plan key (tp-...) from another region -- each works only on its own regional" >&2
+      echo "  provider. Check the key ('byre-mimo-model --no-cache' re-detects the region), or set" >&2
+    else
+      echo "  A Token Plan key (tp-...) only works on its regional provider, and the region" >&2
+      echo "  could not be resolved automatically ('byre-mimo-model --no-cache' says why): check" >&2
+      echo "  the key, or set" >&2
+    fi
+    echo "  the box's MIMO_MODEL=xiaomi-token-plan-{cn,ams,sgp}/<model> (box-wide;" >&2
+    echo "  pjlsergeant/mimo-shared-auth can store it), or pin one run:" >&2
+    echo "  --reviewer mimo:xiaomi-token-plan-<region>/<model> ('mimo models' lists them)." >&2
+  elif printf '%s' "$errs" | grep -iE 'unsupported model|model not found|does not support tool|no endpoints found' >/dev/null; then
     echo "byre-codereview: mimo's model can't run the review (unsupported, not found, or no tool use)." >&2
     echo "  Pass one it can run: --reviewer mimo:<provider/model> ('mimo models' lists them)." >&2
   else
