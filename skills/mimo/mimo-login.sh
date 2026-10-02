@@ -9,9 +9,11 @@
 # here if prompted >" -- no in-box browser needed (its xdg-open attempt fails
 # with a harmless warning). The credential lands in auth.json in the
 # .mimocode state volume, so this runs once per project and survives
-# rebuilds. Best-effort: skip with Ctrl-C (or on failure/timeout) and the
-# box still launches -- log in later with `mimo auth login -p xiaomi` from
-# `byre shell`.
+# rebuilds -- or, with pjlsergeant/mimo-shared-auth, through its symlink
+# into the machine-wide identity volume, so once per machine. Best-effort:
+# skip with Ctrl-C (or on failure/timeout) and the box still launches -- log
+# in later with `mimo-login` (this skill's wrapper of `mimo auth login -p
+# xiaomi`) from `byre shell`.
 command -v mimo >/dev/null 2>&1 || exit 0
 # mimo's data dir is the XDG data home (verified, `mimo debug paths`);
 # honoring XDG_DATA_HOME keeps the hook faithful to the CLI's own resolution
@@ -23,45 +25,105 @@ cred="$data_root/mimocode/auth.json"
 # writes a fresh regular file a planted link can't redirect (mimo writes
 # auth.json IN PLACE, chmod 0600, no temp+rename --
 # packages/shared/src/filesystem.ts:80 -- so a login would write THROUGH a
-# link). No trusted identity-dir exception as in the opencode hook:
-# pjlsergeant/mimo-shared-auth exports XIAOMI_API_KEY through env.d and
-# never symlinks auth.json, so any link here is foreign.
+# link). ONE exception, as in byre's opencode-login hook:
+# pjlsergeant/mimo-shared-auth's own link into ITS identity dir is
+# legitimate, and a DANGLING one is its expected first-login state (the
+# login writes through it into the shared volume). The trusted dir is
+# HARDCODED and compared by EQUALITY, deliberately: an env-derived base
+# (BYRE_IDENTITY_BASE, the companion's test seam) would let anything
+# that reaches the container env (byre rejects BYRE_* in a project [env],
+# config.go, but run_args or a skill runtime env still can) redefine the
+# trusted namespace, and a broader .byre-identity/* match would
+# trust links into SIBLING agents' identity dirs -- through which a login
+# here would overwrite that agent's machine-wide credential. Canonicalize
+# the target's PARENT dir (the final auth.json may be absent); a lexical
+# prefix check would accept planted ..-traversals and reject legitimate
+# relative links. Relative targets resolve from the link's own directory.
+# And the resolved target itself must be absent (dangling: first login) or
+# a regular non-symlink file: a link planted AT the identity dir's auth.json
+# would chain the login's write onward, and the companion hook refuses that
+# case without touching this link -- so it is dropped here instead, and the
+# login writes a safe local regular file. mimo-login (mimo-login-cmd.sh)
+# mirrors this check, since `byre shell` never re-runs this hook.
+shared_auth=""
 if [ -L "$cred" ]; then
-  rm -f "$cred"
-  echo "byre: removed a symlinked mimo credential ($cred); log in again to store a regular file." >&2
+  # Read the target with a sentinel: $(readlink) strips trailing newlines,
+  # so "<trusted path><newline>" -- a different file -- would compare
+  # equal. A target holding a newline is never trusted (tdir stays empty,
+  # so it takes the removal path below).
+  target=$(readlink -n -- "$cred" && printf x); target=${target%x}
+  nl='
+'
+  tdir=""
+  case "$target" in
+    *"$nl"*) ;;
+    *) tdir="$(cd "$data_root/mimocode" 2>/dev/null && cd "$(dirname -- "$target")" 2>/dev/null && pwd -P)" || tdir="" ;;
+  esac
+  tfile="/home/dev/.byre-identity/mimo/auth.json"
+  # Full-path equality: the OWN identity dir AND the auth.json basename
+  # (mimo-shared-auth links exactly that file) -- a dir-only match would
+  # trust a link to any OTHER name inside the dir. -L is tested first:
+  # -e/-f follow links.
+  if [ "$tdir" = "/home/dev/.byre-identity/mimo" ] && [ "$(basename -- "$target")" = "auth.json" ] \
+    && [ ! -L "$tfile" ] && { [ ! -e "$tfile" ] || [ -f "$tfile" ]; }; then
+    shared_auth=1
+  else
+    # A failed removal (an unwritable data dir) must not fall through: the
+    # rejected link would still be there, and a login whose target is
+    # writable would write THROUGH it. Stop without offering the login.
+    if ! rm -f -- "$cred"; then
+      echo "byre: could not remove the symlinked mimo credential $cred; not offering the login -- remove it in byre shell" >&2
+      exit 0
+    fi
+    echo "byre: removed a symlinked mimo credential ($cred); log in again (mimo-login) to store a regular file." >&2
+  fi
 fi
-# A static key in the environment makes the file login unnecessary: the
-# models.dev catalog's env name for provider `xiaomi` (verified live).
-[ -n "${XIAOMI_API_KEY:-}" ] && exit 0
-# pjlsergeant/mimo-shared-auth's stored key counts too. Checked by FILE, not
-# env: byre sources env.d hooks AFTER every firstrun hook (byre-launch, the
-# "Launch env hooks" loop follows the firstrun loop), so its XIAOMI_API_KEY
-# export does not exist yet here -- without this, a box with a shared key
-# would be offered the paste-code login every launch. Same predicate as that
-# companion's env.sh (non-symlink regular file in a non-symlink dir, non-empty
-# AFTER `tr -d '[:space:]'` -- a bare -s would stand down on a whitespace-only
-# file that env.sh exports nothing from, leaving no credential and no login;
-# 2026-10-02 mimo review), and its 00-firstrun hook has already run, so a key
-# pasted this launch counts. A
-# stand-down only, so the env-derived base (its test seam) trusts nothing:
-# the worst a hostile BYRE_IDENTITY_BASE can do is skip a prompt. A
-# symlinked identity DIR counts as nothing stored, matching env.sh -- which
-# would export nothing through it, so standing down would leave the box
-# with no credential and no login offered (2026-10-02 codex review).
-shared_dir="${BYRE_IDENTITY_BASE:-/home/dev/.byre-identity}/mimo"
-shared_key="$shared_dir/api-key"
-if [ ! -L "$shared_dir" ] && [ -f "$shared_key" ] && [ ! -L "$shared_key" ] && [ -s "$shared_key" ] \
-  && [ -n "$(tr -d '[:space:]' < "$shared_key" 2>/dev/null)" ]; then
+# Anything else that is not a regular file (a FIFO, socket, directory) is
+# not a credential mimo wrote. Stop BEFORE jq/tail/mimo open it: opening a
+# FIFO blocks, and this runs before the tty guard below, so a planted FIFO
+# would hang a headless launch. Never delete an unknown object -- say so.
+if [ -e "$cred" ] && [ ! -L "$cred" ] && [ ! -f "$cred" ]; then
+  echo "byre: mimo credential path $cred is not a regular file; not reading it and not offering the login -- inspect it in byre shell" >&2
   exit 0
 fi
-# Already authenticated? There is no `login status` probe, so the guard is
-# a shape sniff (the opencode/grok precedent): auth.json is a provider-keyed
-# map whose entries all carry a "type" member ({"type":"api","key":...}),
-# and a complete JSON.stringify'd store ends in "}" -- the trailing-brace
-# check catches the truncation an interrupted in-place write can leave; an
-# empty store ({}) fails the "type" test. Not caught: a revoked key or an
-# empty balance -- those surface at use time.
-if [ -s "$cred" ] && grep -q '"type"' "$cred" 2>/dev/null \
+# A static key in the environment makes the file login unnecessary: the
+# models.dev catalog's env name for provider `xiaomi` and the Token Plan
+# providers alike (verified live). This sees only what the container env
+# already holds -- env_from_host / [env] values. A `byre credentials` value
+# is exported by the launcher only AFTER every firstrun hook (byre's
+# launcher.sh: the firstrun loop, then env.d, then the credential export),
+# so a box whose XIAOMI_API_KEY comes from `byre credentials` is still
+# offered the login here; Ctrl-C skips it.
+[ -n "${XIAOMI_API_KEY:-}" ] && exit 0
+# A MIMO_MODEL on another provider (the part before the first "/") is a
+# deliberate choice of that provider: the Xiaomi login is not what it needs.
+# xiaomi and the Token Plan providers (xiaomi-token-plan-{cn,ams,sgp},
+# models.dev) still want it. A malformed value (no provider/model shape) is
+# ignored, as byre-mimo-model ignores it, so it changes nothing here either.
+case "${MIMO_MODEL:-}" in
+  xiaomi/*|xiaomi-token-plan-*/*) ;;
+  ?*/?*) exit 0 ;;
+esac
+# Already authenticated? There is no `login status` probe that a hook can
+# trust cheaply, so the guard reads the store: stand down iff auth.json
+# parses and holds a `xiaomi` entry of type "api" with a string key -- what
+# mimoLogin writes (put("xiaomi", {type: "api", key, ...})) and what mimo's
+# Auth schema accepts (Auth.all schema-decodes and drops invalid entries,
+# auth/index.ts:75-89, so a malformed entry is no login to mimo either).
+# `mimo auth whoami` and the default model read that entry only -- a shared
+# store with, say, only an anthropic entry is NOT a xiaomi login. A truncated/corrupt file (an interrupted
+# in-place write) fails jq, so the login is offered, and mimo's Auth.set
+# reads the store as {} (readJson |> orElseSucceed({}), auth/index.ts) and
+# rewrites it whole -- that is the recovery. Not caught: a revoked key or an
+# empty balance -- those surface at use time. jq follows the trusted
+# shared-auth link, so a machine-wide login counts; a dangling one fails and
+# the login below writes through it. jq is in this skill's apt list; should
+# it be missing, fall back to the old shape sniff (a "xiaomi" string, any
+# "type" member and a trailing "}") -- weaker: provider-aware only in that
+# the name appears somewhere, blind to the entry's type and key.
+if command -v jq >/dev/null 2>&1; then
+  jq -e '.xiaomi? | type == "object" and .type == "api" and (.key | type == "string")' "$cred" >/dev/null 2>&1 && exit 0
+elif [ -s "$cred" ] && grep -q '"xiaomi"' "$cred" 2>/dev/null && grep -q '"type"' "$cred" 2>/dev/null \
   && [ "$(tail -c 1 "$cred" 2>/dev/null)" = "}" ]; then
   exit 0
 fi
@@ -73,13 +135,19 @@ fi
 
 # Clean skip on Ctrl-C: exit 0 so no signal-death propagates toward the
 # launcher -- the box proceeds to the agent regardless.
-trap 'echo; echo "byre: mimo login skipped. To do it later, open another terminal and run '\''byre shell'\'', then '\''mimo auth login -p xiaomi'\''."; exit 0' INT
+trap 'echo; echo "byre: mimo login skipped. To do it later, open another terminal and run '\''byre shell'\'', then '\''mimo-login'\'' (it wraps '\''mimo auth login -p xiaomi'\'')."; exit 0' INT
 
 echo ""
 echo "=== byre: first-run MiMo Code login ==="
-echo "Open the URL below, sign in to the Xiaomi MiMo platform, and paste the code back here."
-echo "Stored per-project, survives rebuilds. Ctrl-C to skip (or set XIAOMI_API_KEY instead,"
-echo "or enable pjlsergeant/mimo-shared-auth to share one key across projects)."
+echo "Open the URL below in a browser on your host, sign in to the Xiaomi MiMo platform,"
+echo "authorize, and paste the code back here."
+if [ -n "$shared_auth" ]; then
+  echo "Stored machine-wide (mimo-shared-auth: all your byre projects). Ctrl-C to skip."
+else
+  echo "Stored per-project, survives rebuilds. Ctrl-C to skip (or set XIAOMI_API_KEY instead,"
+  echo "or enable pjlsergeant/mimo-shared-auth to share one login across projects)."
+fi
+echo "Later, or again: 'mimo-login' in 'byre shell' (it wraps 'mimo auth login -p xiaomi')."
 echo "Note: the free MiMo channel has ended; the account needs a balance (otherwise requests answer 402)."
 echo ""
 # Bound the wait; --foreground keeps mimo in the terminal's foreground
@@ -87,5 +155,5 @@ echo ""
 TO=""
 command -v timeout >/dev/null 2>&1 && TO="timeout --foreground 600"
 $TO mimo auth login -p xiaomi \
-  || echo "byre: mimo login didn't complete. To do it later, open another terminal and run 'byre shell', then 'mimo auth login -p xiaomi'." >&2
+  || echo "byre: mimo login didn't complete. To do it later, open another terminal and run 'byre shell', then 'mimo-login' (it wraps 'mimo auth login -p xiaomi')." >&2
 exit 0

@@ -123,13 +123,14 @@ Xiaomi model (`mimo:xiaomi/<model>`, or a Token Plan provider's) rather than
 trusting the box's default.
 
 It needs a credential: the free "MiMo Auto" tier has ended, so a logged-out
-mimo cannot review. The user logs in once with `mimo auth login -p xiaomi` in
-`byre shell` — a paste-code flow (no browser needed), but interactive, so never
-from a tool call — or forwards a platform key as `XIAOMI_API_KEY`. A platform
-account with no balance is refused on every model (402, "Insufficient account
-balance"): the fix is funding the account at platform.xiaomimimo.com, not
-logging in again. mimo reports these failures with exit status 0; the script
-reads its error events instead and names the right fix for each.
+mimo cannot review. The user logs in once: run `byre shell`, then `mimo-login`
+(mimo skill 1.2.0+; wraps `mimo auth login -p xiaomi`) — a paste-code flow (no browser needed),
+but interactive, so never from a tool call — or forwards a platform key as
+`XIAOMI_API_KEY`. A platform account with no balance is refused on every model
+(402, "Insufficient account balance"): the fix is funding the account at
+platform.xiaomimimo.com, not logging in again. mimo reports these failures
+with exit status 0; the script reads its error events instead and names the
+right fix for each.
 
 A Xiaomi **Token Plan** key (it starts `tp-`) works only on its regional
 provider, `xiaomi-token-plan-cn`, `-ams` or `-sgp`; on mimo's default `xiaomi`

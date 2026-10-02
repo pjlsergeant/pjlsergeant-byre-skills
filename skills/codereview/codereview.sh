@@ -1438,7 +1438,7 @@ report_failure_mimo() {
   elif printf '%s' "$errs" | grep -iE 'free api service has ended|invalid api key|"statusCode":401|unauthorized|authenticat' >/dev/null; then
     echo "byre-codereview: mimo has no usable MiMo credential (rejected key, or none — the free" >&2
     echo "  'MiMo Auto' tier has ended, so an unauthenticated mimo cannot review)." >&2
-    echo "  Log in in another terminal: run 'byre shell', then 'mimo auth login -p xiaomi'" >&2
+    echo "  Log in in another terminal: run 'byre shell', then 'mimo-login' (mimo skill 1.2.0+; else 'mimo auth login -p xiaomi')" >&2
     echo "  (a paste-code flow — no browser needed in the box). Or forward a platform key" >&2
     echo "  as XIAOMI_API_KEY in the box's environment." >&2
     # The Token Plan hint follows whatever the key kind (see the header); a
@@ -1452,8 +1452,8 @@ report_failure_mimo() {
       echo "  could not be resolved automatically ('byre-mimo-model --no-cache' says why): check" >&2
       echo "  the key, or set" >&2
     fi
-    echo "  the box's MIMO_MODEL=xiaomi-token-plan-{cn,ams,sgp}/<model> (box-wide;" >&2
-    echo "  pjlsergeant/mimo-shared-auth can store it), or pin one run:" >&2
+    echo "  the box's MIMO_MODEL=xiaomi-token-plan-{cn,ams,sgp}/<model> (box-wide)," >&2
+    echo "  or pin one run:" >&2
     echo "  --reviewer mimo:xiaomi-token-plan-<region>/<model> ('mimo models' lists them)." >&2
   elif printf '%s' "$errs" | grep -iE 'unsupported model|model not found|does not support tool|no endpoints found' >/dev/null; then
     echo "byre-codereview: mimo's model can't run the review (unsupported, not found, or no tool use)." >&2

@@ -13,11 +13,11 @@
 
 [package]
 id = "pjlsergeant/mimo"
-version = "1.1.0"
+version = "1.2.0"
 kind = "skill"
 package_api = 1
 requires_byre = ">=1.3.0"
-description = "The MiMo Code agent (Xiaomi's MIT-licensed opencode fork, binary `mimo`, pinned 0.1.15); paste-code Xiaomi platform login or XIAOMI_API_KEY, persisted per project."
+description = "The MiMo Code agent (Xiaomi's MIT-licensed opencode fork, binary `mimo`, pinned 0.1.15); paste-code Xiaomi login (`mimo-login` in byre shell) or XIAOMI_API_KEY, persisted per project."
 
 [build]
 # jq: the launch adapter builds MIMOCODE_CONFIG_CONTENT from the baked
@@ -26,7 +26,11 @@ description = "The MiMo Code agent (Xiaomi's MIT-licensed opencode fork, binary 
 # byre-mimo-model's region probe.
 apt = ["curl", "ca-certificates", "jq"]
 # mimo-login.sh: first-run auth hook (paste-code Xiaomi platform login,
-# guarded by auth.json / XIAOMI_API_KEY; skippable with Ctrl-C).
+# guarded by auth.json / XIAOMI_API_KEY; skippable with Ctrl-C; trusts
+# pjlsergeant/mimo-shared-auth's auth.json link).
+# mimo-login-cmd.sh: `mimo-login`, the by-hand login from `byre shell` -- a
+# thin wrapper of `mimo auth login -p xiaomi` that refuses without a TTY and
+# shows `mimo auth whoami` after (the codereview skill's codex-login shape).
 # mimo-launch.sh: the agent launch adapter -- MCP + context injection via
 # MIMOCODE_CONFIG_CONTENT, then exec mimo (port of byre's opencode adapter).
 # byre-mimo-model: the model resolver both the adapter and byre-codereview's
@@ -37,7 +41,7 @@ apt = ["curl", "ca-certificates", "jq"]
 # Payload COPYs land before this block's RUN lines; a fetched payload
 # carries no exec bit, hence the chmod (firstrun hooks run as `bash "$hook"`
 # so the hook needs none).
-files = { "mimo-login.sh" = "/etc/byre/firstrun.d/mimo-login", "mimo-launch.sh" = "/usr/local/bin/byre-mimo-launch", "byre-mimo-model" = "/usr/local/bin/byre-mimo-model" }
+files = { "mimo-login.sh" = "/etc/byre/firstrun.d/mimo-login", "mimo-login-cmd.sh" = "/usr/local/bin/mimo-login", "mimo-launch.sh" = "/usr/local/bin/byre-mimo-launch", "byre-mimo-model" = "/usr/local/bin/byre-mimo-model" }
 dockerfile = [
   # Pre-create ~/.local's XDG tree AS THE DEV USER (byre's opencode skill
   # precedent): the state volume targets /home/dev/.local/share/mimocode,
@@ -68,7 +72,7 @@ dockerfile = [
   " && rm -rf /tmp/mimo",
   # Fail the BUILD loudly if the tarball layout ever moves.
   "RUN test -x /usr/local/bin/mimo",
-  "RUN chmod 0755 /usr/local/bin/byre-mimo-launch /usr/local/bin/byre-mimo-model",
+  "RUN chmod 0755 /usr/local/bin/byre-mimo-launch /usr/local/bin/byre-mimo-model /usr/local/bin/mimo-login",
 ]
 
 [runtime]
@@ -85,11 +89,10 @@ env = { MIMOCODE_DISABLE_AUTOUPDATE = "true", MIMOCODE_ENABLE_ANALYSIS = "false"
 # {cn,ams,sgp} alike. A tp- key 401s on `xiaomi`, but byre-mimo-model routes
 # it: GET /v1/models answers 200 only on the key's own region (all verified
 # live 2026-10-01, sgp), so a Token Plan box needs the key and nothing else.
-env_docs.XIAOMI_API_KEY = "Xiaomi MiMo API key, alternative to the paste-code login; set via byre credentials or env_from_host, never [env]. Stands the login hook down. A Token Plan key (tp-) is detected and routed to its regional provider automatically."
+env_docs.XIAOMI_API_KEY = "Xiaomi MiMo API key, alternative to the paste-code login; set via byre credentials or env_from_host, never [env]. An env_from_host value stands the login hook down (a byre credentials value is exported after first-run hooks). A Token Plan (tp-) key is routed to its regional provider."
 # MIMO_MODEL is read by byre-mimo-model, which both mimo-launch.sh (folded
 # into MIMOCODE_CONFIG_CONTENT as `model`) and byre-codereview's bare
-# `--reviewer mimo` call. Not a secret: a plain [env] literal is fine, or
-# pjlsergeant/mimo-shared-auth's file.
+# `--reviewer mimo` call. Not a secret: a plain [env] literal is fine.
 env_docs.MIMO_MODEL = "Optional override of the mimo agent's and a bare --reviewer mimo's model, as provider/model, e.g. xiaomi-token-plan-sgp/mimo-v2.6-pro. Plain [env] value, not a secret. Token Plan (tp-) keys are detected automatically; run byre-mimo-model to see the model in use."
 # Egress (443). api.xiaomimimo.com = inference; platform.xiaomimimo.com =
 # the OAuth authorize page + code callback of `mimo auth login -p xiaomi`;
@@ -133,10 +136,11 @@ mcp = "inject"
 context = "inject"
 state = ".mimocode"
 
-# No host-seeded auth: log in per box via the firstrun hook (the .mimocode
-# volume persists auth.json across rebuilds), or enable the optional
-# pjlsergeant/mimo-shared-auth companion, which exports XIAOMI_API_KEY and
-# MIMO_MODEL from a machine-scoped identity volume.
+# No host-seeded auth: log in per box via the firstrun hook or `mimo-login`
+# (the .mimocode volume persists auth.json across rebuilds), or enable the
+# optional pjlsergeant/mimo-shared-auth companion, which symlinks auth.json
+# into a machine-scoped identity volume so one login serves every project
+# (the login hook trusts exactly that link).
 
 [[volumes]]
 name = ".mimocode"
@@ -152,13 +156,13 @@ target = "/home/dev/.local/share/mimocode"
 [[package.files]]
 src = "byre-mimo-model"
 dest = "byre-mimo-model"
-sha256 = "b92578c0f1e1655db9234b752ce235a3a36575fc4d4a34f8f9d535b0135cec64"
+sha256 = "9cff9ebdab03072178e04912286180a163becd4949c3ce3ae4b9bf2cec3ea26b"
 executable = true
 
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "a8ef04462c6a3e60eaf852c9c60fb931c2bc963b103996bf148ad3ba45933de5"
+sha256 = "b1a8178fb7d8d023ef72b88b1ad421e53df882230f7a60c4568e87d032176e30"
 
 [[package.files]]
 src = "mimo-launch.sh"
@@ -166,7 +170,12 @@ dest = "mimo-launch.sh"
 sha256 = "f2abdc1bf4265dce094f35d9ea8ad880f034cf915ec81270548bedf24894380a"
 
 [[package.files]]
+src = "mimo-login-cmd.sh"
+dest = "mimo-login-cmd.sh"
+sha256 = "ca5f0e57b0b14c9cc58e453dca65e8860147220d7bf8c0d8ef7780853de02652"
+
+[[package.files]]
 src = "mimo-login.sh"
 dest = "mimo-login.sh"
-sha256 = "be3f591adec44eb7784755598821511d7ffa70b598893b974d27a871c21b9317"
+sha256 = "016f4d1db49ed8c95c788394466a98786c40bd58b8cadd3b56aa3f216f3f5cd1"
 

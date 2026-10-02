@@ -38,7 +38,7 @@ read-only agent, so the tree is left untouched; a bare `--reviewer mimo`
 runs the model `byre-mimo-model` resolves for the box and names it.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.12/skills/codereview/skill.toml --digest sha256:beec3e538bd1776cb917a09776908582f8935bb0d8c27e3ec9df33d04412d622
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.13/skills/codereview/skill.toml --digest sha256:bb9853c9782ccafdf46c7f0d4066c60557f8e5142e885b135ce704a7331368b9
 ```
 
 ### pjlsergeant/toolbox
@@ -187,17 +187,22 @@ sha256-verified at build -- not via the official `curl | sh` installer,
 which pulls from a Xiaomi download host that publishes no checksums (and
 timed out from a box). byre's MCP servers and agent context are injected
 through `MIMOCODE_CONFIG_CONTENT`, composing with your own mimo config;
-autoupdate and upstream analytics are switched off. Auth is either the
-paste-code login a fresh box offers at first run (or later: `byre shell`,
-then `mimo auth login -p xiaomi`) or `XIAOMI_API_KEY` (a credential --
-`byre credentials set` or `env_from_host`, never a baked `[env]` literal);
-it persists per project in a state volume. The free anonymous MiMo channel
-has ended, and a platform account with no balance answers 402 -- both
-while `mimo run` still exits 0.
+autoupdate and upstream analytics are switched off. Auth is first and
+foremost mimo's own paste-code login, for platform and Token Plan accounts
+alike: a fresh box offers it at first run, or later run `mimo-login` in
+`byre shell` (it wraps `mimo auth login -p xiaomi`), open the URL it prints
+in a browser on the host, authorize, and paste the code back; `mimo auth
+whoami` shows the result. It persists per project in a state volume (or
+machine-wide, with `pjlsergeant/mimo-shared-auth`, below). The alternative is
+a static `XIAOMI_API_KEY` (a credential -- `byre credentials set` or
+`env_from_host`, never a baked `[env]` literal). The free anonymous MiMo
+channel has ended, and a platform account with no balance answers 402 --
+both while `mimo run` still exits 0.
 
-A Token Plan box needs only the key. Token Plan keys (prefix `tp-`) work
-only on their regional `xiaomi-token-plan-{cn,ams,sgp}` provider (on mimo's
-default `xiaomi` provider a valid `tp-` key gets 401 "Invalid API Key"), so
+A Token Plan box using `XIAOMI_API_KEY` needs only the key. Token Plan keys
+(prefix `tp-`) work only on their regional `xiaomi-token-plan-{cn,ams,sgp}`
+provider (on mimo's default `xiaomi` provider a valid `tp-` key gets 401
+"Invalid API Key"), so
 the skill's `byre-mimo-model` resolver probes the three
 `token-plan-<region>.xiaomimimo.com` hosts (open with the skill) once,
 routes the agent and a bare `--reviewer mimo` to the region that accepts the
@@ -205,44 +210,40 @@ key, and caches the answer per project in
 `~/.local/share/mimocode/byre-token-plan` (a key hash and the region, never
 the key). `MIMO_MODEL` (a plain `[env]` value, `provider/model`) overrides
 that choice for any key. Run `byre-mimo-model` in the box to see what it
-will run (no output: mimo's own default). To set key and model once for
-every project, enable `pjlsergeant/mimo-shared-auth` (below).
+will run (no output: mimo's own default).
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.12/skills/mimo/skill.toml --digest sha256:44c436961d6fe26534e42d466988983702622d7fbef625722f461d85650c1df9
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.13/skills/mimo/skill.toml --digest sha256:b136ec19bb5800d821ed143e41966452da8a42b1d4de1199a844fc6f9513624c
 ```
 
 ### pjlsergeant/mimo-shared-auth
 
-Optional companion for `pjlsergeant/mimo`: stores one static Xiaomi API key,
-and optionally a default model, in a machine-scoped identity volume and
-exports them as `XIAOMI_API_KEY` and `MIMO_MODEL` to every opted-in box. The
-shared key is exported unless the project sets `XIAOMI_API_KEY`; the shared
-model only alongside the shared key (a project that brings its own key gets
-automatic detection, or its own `MIMO_MODEL`), and a project `MIMO_MODEL`
-always wins. It declares itself as `pjlsergeant/mimo`'s shared-auth
+Optional companion for `pjlsergeant/mimo`: one MiMo Code login for every
+project on the machine. mimo's `auth.json` becomes a symlink into a
+machine-scoped identity volume (`~/.byre-identity/mimo/auth.json`), re-asserted
+at every launch; mimo writes the file in place, so the first `mimo-login` in
+any box writes through the link and logs every opted-in box in, and
+`mimo auth logout` logs them all out. An existing per-project login is
+promoted to the shared file when there is none yet. Nothing is prompted for
+and nothing is exported; a project `XIAOMI_API_KEY` stays a separate,
+per-project credential. The file is shared whole; API-key-style entries (the
+Xiaomi login is one) are the only ones that share safely -- an OAuth entry in
+it is shared too and will race across boxes, so log that provider in with an
+API key instead (the launch hook warns about one and leaves it alone).
+Requires `pjlsergeant/mimo` 1.2.0+, whose login hook trusts the shared link;
+with an older one the launch hook warns and asserts nothing. It declares itself as `pjlsergeant/mimo`'s shared-auth
 companion, so byre offers it during onboarding and nests it beneath that
 agent in the config UI.
 
-The first-run prompt asks for the key (masked), then the model. For a Token
-Plan (`tp-`) key it detects the region first and offers the result (e.g.
-`xiaomi-token-plan-sgp/mimo-v2.6-pro`) as the Enter default, so the usual
-answer is Enter; only if detection fails does it ask and warn. A plain
-platform key can leave the model empty. A Token Plan key with no stored
-model is asked for one at each interactive launch; a platform key is not. To
-fix only a Token Plan key's model, run `rm ~/.byre-identity/mimo/model`
-inside `byre shell`: the next launch keeps the stored key and prompts for the
-model alone. To rotate the key, run `rm ~/.byre-identity/mimo/api-key`
-instead, which re-prompts for both (the stored model is offered as the
-default unless you remove it too). Either way, exit that shell immediately
-because it still exports the old values,
-then relaunch byre and answer the first-run prompt. This rotates the
-machine-scoped credential for every opted-in project; an explicit project
-`XIAOMI_API_KEY` overrides the shared file, suppresses the prompt, and must
-instead be replaced at its source.
+Upgrading from 1.0, which asked for a pasted key: that prompt could not work
+with mimo's login (the pasted code is encrypted for the process that printed
+the URL), and its `~/.byre-identity/mimo/api-key` and `model` files are now
+unused. The launch hook prints a notice while they exist; remove them with
+`rm ~/.byre-identity/mimo/api-key ~/.byre-identity/mimo/model` in
+`byre shell`, then run `mimo-login`.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.12/skills/mimo-shared-auth/skill.toml --digest sha256:cfdad58311ee21ee6033fde3e80326dedf843641ce1fb72ac8da4fc79c192e49
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.13/skills/mimo-shared-auth/skill.toml --digest sha256:521fc0b5aa1f8ddfb3f49481d90eb0b620998fc03dc95f544dbcc6ac390064c8
 ```
 
 ## Publishing a new version

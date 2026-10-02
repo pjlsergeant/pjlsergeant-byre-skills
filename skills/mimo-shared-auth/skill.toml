@@ -1,3 +1,57 @@
+# One MiMo Code login shared by every byre box that opts in, the
+# opencode-shared-auth way (byre's built-in companion, which this mirrors):
+# mimo's data-dir auth.json becomes a symlink into the machine-scoped
+# identity volume. 1.0 prompted for a pasted "API key" instead -- but
+# mimo's Xiaomi login (`mimo auth login -p xiaomi`) never shows the user a
+# key: the code pasted back is AES-GCM ciphertext bound to an X25519 key the
+# login process minted, and only that process can decrypt it into
+# {sk, uid, url} (MiMo-Code packages/cli/src/plugin/mimo.ts,
+# cli/cmd/providers.ts mimoLogin). So the thing to share is the login's
+# result, auth.json, not a key.
+#
+# Mechanism (mirrors opencode-shared-auth; source-verified, MiMo Code 0.1.15):
+#   * Write pattern: mimo writes auth.json IN PLACE (Auth.set/remove ->
+#     FileSystem.writeJson = writeFileString + chmod 0600, no temp+rename:
+#     packages/cli/src/auth/index.ts:9,97,106, packages/shared/src/
+#     filesystem.ts:80), so a login writes THROUGH the link into the shared
+#     volume and a dangling link is the expected first-login state. The
+#     grok failure mode (rename forks the credential off the link) does not
+#     apply.
+#   * The firstrun hook asserts the symlink EVERY launch (healing a fork),
+#     adopts an existing per-project login into the shared volume, and
+#     prefers the shared credential over a local fork. pjlsergeant/mimo's
+#     login hook keeps its anti-planting symlink removal for any OTHER link;
+#     a link to exactly /home/dev/.byre-identity/mimo/auth.json is ours.
+#   * REQUIRES pjlsergeant/mimo 1.2.0+: an older login hook removes EVERY
+#     symlinked auth.json, this link included, and the two would thrash.
+#     byre packages have no dependency field, so the firstrun hook gates on
+#     it: it greps the installed login hook for that trusted path (absent
+#     from 1.1.0's) and, failing that, warns and touches nothing.
+#
+# SHARED WHOLE; ONLY API-KEY-STYLE ENTRIES SHARE SAFELY: the file is shared
+# as one store, every entry in it. The Xiaomi login stores
+# {"type": "api", "key": "tp-...", "metadata": {"uid", "base_url"}} (the
+# xiaomi plugin's auth loader turns base_url into the provider's baseURL),
+# static and safe to share. An OAuth entry (e.g. ChatGPT via mimo's generic
+# login) in it IS shared too, and rotates a SINGLE-USE refresh token that
+# concurrent boxes race on and cascade-logout. Nothing gates it: the
+# firstrun hook only WARNS (friendly, never touches the credential) if the
+# shared store holds one.
+#
+# Accepted residual: sharing auth.json shares ALL provider credentials in it,
+# not just the Xiaomi one -- the file is one store, and byre does not split it.
+#
+# Accepted residual -- UPSTREAM torn-read hazard (inherited from opencode):
+# Auth.set/remove are an UNLOCKED read-modify-write, and Auth.all swallows
+# any read error to {} (readJson |> orElseSucceed, auth/index.ts:83) -- so a
+# read landing on a half-written file, then a write, silently destroys EVERY
+# provider's entry. Not worked around, as in opencode-shared-auth: API-key
+# logins write auth.json once, at login, never on a refresh cycle, so the
+# only window is two boxes logging in at the same instant.
+#
+# The 1.0 files ~/.byre-identity/mimo/api-key and model are no longer read;
+# the hook prints a one-line notice while they exist and never deletes them.
+
 # Offer this as pjlsergeant/mimo's shared-auth companion during onboarding and
 # nest it beneath that agent in byre's config UI. This must precede [package]
 # so it remains top-level TOML rather than package metadata.
@@ -5,17 +59,17 @@ shared_auth_for = "pjlsergeant/mimo"
 
 [package]
 id = "pjlsergeant/mimo-shared-auth"
-version = "1.0.0"
+version = "1.1.0"
 kind = "skill"
 package_api = 1
 requires_byre = ">=1.0.0"
-description = "Share one static Xiaomi MiMo API key, and a default model (MIMO_MODEL), across byre projects that use pjlsergeant/mimo."
+description = "Share one MiMo Code login (the paste-code Xiaomi/Token Plan login) across all your projects that use pjlsergeant/mimo."
 
 [build]
-# 00- sorts this firstrun hook before pjlsergeant/mimo's mimo-login, which
-# stands down on the key file this one writes (env.d runs after ALL firstrun
-# hooks, so the login hook cannot wait for the export).
-files = { "firstrun.sh" = "/etc/byre/firstrun.d/00-mimo-shared-auth", "env.sh" = "/etc/byre/env.d/50-mimo-shared-auth.sh" }
+# 00- sorts this firstrun hook before pjlsergeant/mimo's mimo-login, so that
+# hook finds the link already asserted (and trusts it). No env.d hook any
+# more: nothing is exported.
+files = { "firstrun.sh" = "/etc/byre/firstrun.d/00-mimo-shared-auth" }
 
 [context]
 file = "context.md"
@@ -30,16 +84,11 @@ scope = "machine"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "40f5af0d6b22674bb30a3008244dec8e65fced20e0c82556f6ae9e59cc63ace3"
-
-[[package.files]]
-src = "env.sh"
-dest = "env.sh"
-sha256 = "6f9b396ad55935ab32e4bf4578e1418b66f6dde893f0c2186e751310cd58dc40"
+sha256 = "1750de17ae39fba85eefb74305fa36ae90a799c19c8f4e8a037fb3537a3e187b"
 
 [[package.files]]
 src = "firstrun.sh"
 dest = "firstrun.sh"
-sha256 = "c9ad6d7180c3b0c9b9f6049e1936a8bcc983df89e7584c9c9775815286e04f10"
+sha256 = "dfef15a1234cd54de39ee00f9941447556d74144fc52469bf716f68f84651098"
 executable = true
 

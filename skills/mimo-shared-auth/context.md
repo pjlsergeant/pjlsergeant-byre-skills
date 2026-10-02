@@ -1,40 +1,40 @@
-## Shared Xiaomi MiMo key and model (mimo-shared-auth)
+## Shared MiMo Code login (mimo-shared-auth)
 
-This box can authenticate the `mimo` command from a machine-wide key stored at
-`~/.byre-identity/mimo/api-key`, and pick its default model from
-`~/.byre-identity/mimo/model`. They are exported as `XIAOMI_API_KEY` and
-`MIMO_MODEL` at launch and in login shells. The shared key is exported unless
-the project sets `XIAOMI_API_KEY`; the shared model only alongside the shared
-key (a project that brings its own key gets detection, or its own
-`MIMO_MODEL`), and a project `MIMO_MODEL` always wins.
+This box's mimo login is machine-wide: `~/.local/share/mimocode/auth.json` is
+a symlink to `~/.byre-identity/mimo/auth.json`, one file shared by every
+project on this machine that enables mimo-shared-auth. A launch hook
+re-asserts the link every time (a dangling link just means nobody has logged
+in yet); an existing per-project login is promoted to the shared file when
+there is none yet, and a local copy that forked off it is replaced by it.
 
-A Token Plan key (it starts `tp-`) works only with a model on its regional
-provider, `xiaomi-token-plan-{cn,ams,sgp}/<model>`; with mimo's default
-`xiaomi/*` model a perfectly valid key is refused with 401 "Invalid API Key".
-When such a key is pasted, the first-run prompt detects its region (with
-`byre-mimo-model`, from the mimo skill) and offers the result, e.g.
-`xiaomi-token-plan-sgp/mimo-v2.6-pro`, as the Enter default; that is what
-gets stored. Even with no stored model, the mimo launcher detects the region
-itself, so the model file is an override, not a requirement. A 401 with a
-good key means the stored model (or `MIMO_MODEL`) names the wrong provider:
-`env -u MIMO_MODEL byre-mimo-model --no-cache` shows what detection picks.
+So the first login in any box logs in every box: run `mimo-login` (it wraps
+`mimo auth login -p xiaomi`) in `byre shell`, open the URL it prints in a
+browser on the host, authorize, and paste the code back. mimo writes through
+the link. `mimo auth whoami` shows the shared login; `mimo auth logout`
+removes it from the shared file, which logs every box out.
 
-To fix only the model of a Token Plan key that 401s, run
-`rm ~/.byre-identity/mimo/model` from `byre shell`: the next launch keeps the
-stored key and prompts for the model alone, with the detected one as the
-Enter default. A `tp-` key with no stored model is asked for one at each
-interactive launch; a platform key is not (an empty model is valid for it),
-so to change its model, rotate the key or set `MIMO_MODEL`.
+Only API-key-style entries are meant to be shared: the Xiaomi login stores
+one, as does any plain API-key login. An OAuth entry (e.g. ChatGPT through mimo's
+generic login) uses a refresh token that boxes race on; the hook warns if
+one is in the shared file and leaves it alone. The file holds every
+provider's credential, so all of them are shared. The hook refuses to assert
+the link (and touches nothing) when the shared path is a symlink or not a
+regular file, or the per-project auth.json is not a file or a link. It
+needs `pjlsergeant/mimo` 1.2.0+ (whose login hook trusts the shared link);
+with an older mimo skill it warns and asserts nothing until that is
+upgraded and the box rebuilt.
 
-To rotate the shared key, run `rm ~/.byre-identity/mimo/api-key`, which
-re-prompts for both (the stored model is offered as the Enter default unless
-you remove it too). After either `rm`, exit that shell immediately, since its
-environment still holds the old values, then relaunch byre and answer the
-first-run prompt; the later environment hook loads the new files for the
-agent launched in the same run.
+`~/.byre-identity/mimo/api-key` and `model` are left over from
+mimo-shared-auth 1.0, which asked for a pasted key. Nothing reads them; the
+hook prints a notice while they exist. Remove them with
+`rm ~/.byre-identity/mimo/api-key ~/.byre-identity/mimo/model`.
 
-The shared files must remain non-symlink regular files with mode `0600`. This
-procedure changes the machine-scoped key and model used by every opted-in
-project. If the project explicitly supplies `XIAOMI_API_KEY`, the prompt is
-skipped and that value takes precedence; rotate it at its project or host
-source instead.
+A project `XIAOMI_API_KEY` is a separate, env-only credential (per project,
+not shared). It is a secret: forward it with `env_from_host` (never `[env]`).
+An env_from_host `XIAOMI_API_KEY` (not a `byre credentials` one, exported
+after first-run hooks), or a `MIMO_MODEL` on another provider, stops the
+first-run xiaomi login from being offered. With both present, mimo merges
+the env key first and auth.json over it, so for the `xiaomi` provider the
+shared login's key wins; a Token Plan (`tp-`) env key is still used, because
+`byre-mimo-model` routes it to its regional `xiaomi-token-plan-*` provider,
+which the login does not cover.

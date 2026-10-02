@@ -9,7 +9,7 @@
 #   -q          no stderr (the reviewer's pre-flight: its own failure report
 #               explains a 401 better than this line would)
 #   --no-cache  skip the cache read and probe now (the cache is still
-#               refreshed); mimo-shared-auth's first-run detection uses it
+#               refreshed); for a diagnosis that must not trust the cache
 #
 # Order:
 #  1. MIMO_MODEL, when set: printed as-is. Shape check only, deliberately

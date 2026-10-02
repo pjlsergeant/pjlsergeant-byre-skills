@@ -11,14 +11,22 @@ replacing it) and execs `mimo`. `mimo models xiaomi` lists the models
 
 ## Auth
 
-- Paste-code login: `byre shell`, then `mimo auth login -p xiaomi`. It
-  prints a `platform.xiaomimimo.com/authorize` URL; open it on the host,
-  sign in, paste the code back. A fresh interactive box offers this once at
-  first run (Ctrl-C skips). The key lands in
-  `~/.local/share/mimocode/auth.json`.
+- Login: the user runs `mimo-login` in `byre shell` (it wraps
+  `mimo auth login -p xiaomi`; it needs a terminal, so never from a tool
+  call). It prints a `platform.xiaomimimo.com/authorize` URL; they open it
+  on the host, authorize, and paste the code back. Platform and Token Plan
+  accounts both log in this way, and a fresh interactive box offers it once
+  at first run (Ctrl-C skips). The result lands in
+  `~/.local/share/mimocode/auth.json` (per project), or machine-wide with
+  `pjlsergeant/mimo-shared-auth`. `mimo auth whoami` shows the login status.
+  A Token Plan login already carries its regional endpoint (auth.json
+  `metadata.base_url`, e.g. `https://token-plan-sgp.xiaomimimo.com/v1`,
+  verified live 2026-10-02; MiMo-Code plugin/mimo.ts `auth.loader` applies
+  it as provider `xiaomi`'s baseURL), so a login needs no region routing:
+  `byre-mimo-model` serves only env `XIAOMI_API_KEY` keys.
 - Or a static key: `XIAOMI_API_KEY` (a credential: `byre credentials set`
-  or `env_from_host`, never a baked `[env]` literal). Set, it makes the
-  first-run login stand down.
+  or `env_from_host`, never a baked `[env]` literal). An `env_from_host`
+  key makes the first-run login stand down.
 - Token Plan keys (prefix `tp-`) work only on their regional provider,
   `xiaomi-token-plan-cn`, `-ams` or `-sgp` (they read `XIAOMI_API_KEY`
   too); on the default `xiaomi` provider a valid `tp-` key answers 401
@@ -38,10 +46,9 @@ replacing it) and execs `mimo`. `mimo models xiaomi` lists the models
   you last picked in the TUI, until the next rebuild. A malformed value is
   warned about and ignored. An id mimo doesn't list falls back to mimo's
   default with no error.
-- `pjlsergeant/mimo-shared-auth`, if enabled, supplies both
-  `XIAOMI_API_KEY` and `MIMO_MODEL` machine-wide from
-  `~/.byre-identity/mimo/` (it detects a `tp-` key's model when you paste
-  it); explicit per-project values win.
+- `pjlsergeant/mimo-shared-auth`, if enabled, makes `auth.json` a symlink
+  into `~/.byre-identity/mimo/`, so one login serves every opted-in
+  project. It exports nothing; `XIAOMI_API_KEY` stays per project.
 - The free anonymous "MiMo Auto" channel is gone: `mimo run` then prints
   "MiMo free API service has ended..." and still exits 0. An account with
   no balance answers 402 "Insufficient account balance", also exit 0 --
