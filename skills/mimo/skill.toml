@@ -13,7 +13,7 @@
 
 [package]
 id = "pjlsergeant/mimo"
-version = "1.2.0"
+version = "1.2.1"
 kind = "skill"
 package_api = 1
 requires_byre = ">=1.3.0"
@@ -89,7 +89,7 @@ env = { MIMOCODE_DISABLE_AUTOUPDATE = "true", MIMOCODE_ENABLE_ANALYSIS = "false"
 # {cn,ams,sgp} alike. A tp- key 401s on `xiaomi`, but byre-mimo-model routes
 # it: GET /v1/models answers 200 only on the key's own region (all verified
 # live 2026-10-01, sgp), so a Token Plan box needs the key and nothing else.
-env_docs.XIAOMI_API_KEY = "Xiaomi MiMo API key, alternative to the paste-code login; set via byre credentials or env_from_host, never [env]. An env_from_host value stands the login hook down (a byre credentials value is exported after first-run hooks). A Token Plan (tp-) key is routed to its regional provider."
+env_docs.XIAOMI_API_KEY = "Xiaomi MiMo API key, alternative to the paste-code login; set via byre credentials or env_from_host, never [env]. Any value in the env stands the login hook down (a byre credentials one only on byre 1.12+). A Token Plan (tp-) key is routed to its regional provider."
 # MIMO_MODEL is read by byre-mimo-model, which both mimo-launch.sh (folded
 # into MIMOCODE_CONFIG_CONTENT as `model`) and byre-codereview's bare
 # `--reviewer mimo` call. Not a secret: a plain [env] literal is fine.
@@ -162,7 +162,7 @@ executable = true
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "b1a8178fb7d8d023ef72b88b1ad421e53df882230f7a60c4568e87d032176e30"
+sha256 = "bb1bdbf5b581bfa225946052a8cd79a8271132452f6b4d9fdb87522d113ebc7d"
 
 [[package.files]]
 src = "mimo-launch.sh"
@@ -177,5 +177,5 @@ sha256 = "ca5f0e57b0b14c9cc58e453dca65e8860147220d7bf8c0d8ef7780853de02652"
 [[package.files]]
 src = "mimo-login.sh"
 dest = "mimo-login.sh"
-sha256 = "016f4d1db49ed8c95c788394466a98786c40bd58b8cadd3b56aa3f216f3f5cd1"
+sha256 = "ea079ffd0d52deee61e9cd8619a1423a4dc5e455b97501a7aa5c96a0596936e2"
 

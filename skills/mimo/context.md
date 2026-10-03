@@ -25,8 +25,10 @@ replacing it) and execs `mimo`. `mimo models xiaomi` lists the models
   it as provider `xiaomi`'s baseURL), so a login needs no region routing:
   `byre-mimo-model` serves only env `XIAOMI_API_KEY` keys.
 - Or a static key: `XIAOMI_API_KEY` (a credential: `byre credentials set`
-  or `env_from_host`, never a baked `[env]` literal). An `env_from_host`
-  key makes the first-run login stand down.
+  or `env_from_host`, never a baked `[env]` literal). Any `XIAOMI_API_KEY`
+  in the box env makes the first-run login stand down: an `env_from_host`
+  one, or a `byre credentials` one on byre 1.12+ (older byre delivered
+  those after the first-run hooks, so the login was still offered).
 - Token Plan keys (prefix `tp-`) work only on their regional provider,
   `xiaomi-token-plan-cn`, `-ams` or `-sgp` (they read `XIAOMI_API_KEY`
   too); on the default `xiaomi` provider a valid `tp-` key answers 401

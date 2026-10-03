@@ -38,7 +38,7 @@ read-only agent, so the tree is left untouched; a bare `--reviewer mimo`
 runs the model `byre-mimo-model` resolves for the box and names it.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.13/skills/codereview/skill.toml --digest sha256:bb9853c9782ccafdf46c7f0d4066c60557f8e5142e885b135ce704a7331368b9
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.14/skills/codereview/skill.toml --digest sha256:b9d46b0a562db58b6b289dfb0c0ddc790bcf4c3534824b188508b1a8f44452fa
 ```
 
 ### pjlsergeant/toolbox
@@ -213,7 +213,7 @@ that choice for any key. Run `byre-mimo-model` in the box to see what it
 will run (no output: mimo's own default).
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.13/skills/mimo/skill.toml --digest sha256:b136ec19bb5800d821ed143e41966452da8a42b1d4de1199a844fc6f9513624c
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.14/skills/mimo/skill.toml --digest sha256:0944e7a6022fc5b5b2bb241763e861ca22f45c028c9f12ca81f6f2c3705a40d4
 ```
 
 ### pjlsergeant/mimo-shared-auth
@@ -243,7 +243,7 @@ unused. The launch hook prints a notice while they exist; remove them with
 `byre shell`, then run `mimo-login`.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.13/skills/mimo-shared-auth/skill.toml --digest sha256:521fc0b5aa1f8ddfb3f49481d90eb0b620998fc03dc95f544dbcc6ac390064c8
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.14/skills/mimo-shared-auth/skill.toml --digest sha256:b32c81cd853fc822cb98b4323fc46083e66511ddd9e6408afb6c38d305add809
 ```
 
 ## Publishing a new version

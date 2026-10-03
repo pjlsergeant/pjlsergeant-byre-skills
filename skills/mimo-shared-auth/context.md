@@ -31,9 +31,10 @@ hook prints a notice while they exist. Remove them with
 
 A project `XIAOMI_API_KEY` is a separate, env-only credential (per project,
 not shared). It is a secret: forward it with `env_from_host` (never `[env]`).
-An env_from_host `XIAOMI_API_KEY` (not a `byre credentials` one, exported
-after first-run hooks), or a `MIMO_MODEL` on another provider, stops the
-first-run xiaomi login from being offered. With both present, mimo merges
+Any `XIAOMI_API_KEY` in the box env (env_from_host, or `byre credentials` on
+byre 1.12+; older byre exported those after the first-run hooks), or a
+`MIMO_MODEL` on another provider, stops the first-run xiaomi login from
+being offered. With both present, mimo merges
 the env key first and auth.json over it, so for the `xiaomi` provider the
 shared login's key wins; a Token Plan (`tp-`) env key is still used, because
 `byre-mimo-model` routes it to its regional `xiaomi-token-plan-*` provider,

@@ -1,6 +1,6 @@
 [package]
 id = "pjlsergeant/codereview"
-version = "1.7.1"
+version = "1.7.2"
 kind = "skill"
 package_api = 1
 requires_byre = ">=0.1.10"
@@ -20,7 +20,7 @@ file = "context.md"
 [[package.files]]
 src = "codereview.sh"
 dest = "codereview.sh"
-sha256 = "6ccccc485f33be5dc07a632453015673c3a3b28c88d1b4065b8b737e5f81b336"
+sha256 = "88f3da4a6e19100d8d9f4cb8bc75e4919d4b834d2fe16268a710b7740c41103a"
 
 [[package.files]]
 src = "codex-login.sh"
@@ -30,7 +30,7 @@ sha256 = "d5386ac892850a8d16ac52d99df0fe1a82f8a4bfb9730e5cf456b884d0b433e2"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "7216627b5f024095bcbf59cd5e0d04b8d459791e067fe0a996972ba1cccfc7f8"
+sha256 = "35a115dd46314c4c67f6db0754e20c3b3aaf0a636b070fe024eb97e4288b8053"
 
 [[package.files]]
 src = "devlog-lib.sh"

@@ -193,4 +193,7 @@ zai has no login command. If Z.AI rejects the key, the script names the
 rotation: a project-sourced `ZAI_API_KEY` is replaced at its source; with
 `zai-shared-auth` the user removes `~/.byre-identity/zai/api-key` in
 `byre shell`, exits that shell immediately (it still exports the old key), and
-relaunches byre to paste the replacement.
+relaunches byre to paste the replacement. A Z.AI quota refusal ("rate limit
+exceeded" / "Limit Exhausted" in the error events) is reported as such, with
+the reset time when the log gives one -- not a key problem, so do not rotate
+the key; wait for the reset or use another reviewer.

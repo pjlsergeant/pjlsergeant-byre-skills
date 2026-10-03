@@ -725,9 +725,32 @@ codex_family_error_events() {
   ' "$DBG" 2>/dev/null || true
 }
 
+# Quota exhaustion is checked FIRST: it surfaces in the same reconnect-then-
+# stream-closed shape as the 401, and sending it to the key advice below costs
+# a needless machine-wide key rotation. Observed 2026-10-02 (codex-family
+# --json, Z.AI): five {"type":"error","message":"Reconnecting... 5/5 (rate
+# limit exceeded: Weekly/Monthly Limit Exhausted. Your limit will reset at
+# 2026-10-06 19:54:40 ...)"} events, then {"type":"turn.failed","error":
+# {"message":"rate limit exceeded: ..."}} -- both in the owned channel
+# codex_family_error_events reads, so a review quoting these words cannot
+# trip it. The reset time is passed on as Z.AI states it (no zone added).
+# `grep >/dev/null`, not -q, and `sed -n 1p`, not head: the SIGPIPE-under-
+# pipefail hole report_failure_mimo documents.
 report_failure_zai() {
-  local errs; errs=$(codex_family_error_events)
-  if printf '%s' "$errs" | grep -qiE '"code"[[:space:]]*:[[:space:]]*401|token expired or incorrect|stream closed before response\.completed|unauthorized|invalid api key|api key|401'; then
+  local errs reset; errs=$(codex_family_error_events)
+  if printf '%s' "$errs" | grep -iE 'rate limit exceeded|limit exhausted' >/dev/null; then
+    reset=$(printf '%s' "$errs" \
+      | grep -oiE 'reset at [0-9]{4}-[0-9]{2}-[0-9]{2}([ T][0-9]{2}:[0-9]{2}(:[0-9]{2})?)?' \
+      | sed -n '1s/^[^0-9]*//p' || true)
+    echo "byre-codereview: Z.AI refused the request: the plan's quota is exhausted (not a key" >&2
+    if [ -n "$reset" ]; then
+      echo "  problem); it resets at $reset. Do not rotate the key; wait for the reset" >&2
+    else
+      echo "  problem); the log gives no reset time. Do not rotate the key; wait for the reset" >&2
+    fi
+    echo "  or use another reviewer (codex, grok, mimo)." >&2
+    echo "  Debug log: $DBG" >&2
+  elif printf '%s' "$errs" | grep -qiE '"code"[[:space:]]*:[[:space:]]*401|token expired or incorrect|stream closed before response\.completed|unauthorized|invalid api key|api key|401'; then
     echo "byre-codereview: Z.AI may have rejected the request — an expired or" >&2
     echo "  incorrect ZAI_API_KEY is the common cause. The reconnect-then-stream-" >&2
     echo "  closed shape is how that 401 usually surfaces in Codex; a plain network" >&2

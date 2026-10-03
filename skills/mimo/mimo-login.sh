@@ -88,12 +88,14 @@ if [ -e "$cred" ] && [ ! -L "$cred" ] && [ ! -f "$cred" ]; then
 fi
 # A static key in the environment makes the file login unnecessary: the
 # models.dev catalog's env name for provider `xiaomi` and the Token Plan
-# providers alike (verified live). This sees only what the container env
-# already holds -- env_from_host / [env] values. A `byre credentials` value
-# is exported by the launcher only AFTER every firstrun hook (byre's
-# launcher.sh: the firstrun loop, then env.d, then the credential export),
-# so a box whose XIAOMI_API_KEY comes from `byre credentials` is still
-# offered the login here; Ctrl-C skips it.
+# providers alike (verified live). This sees whatever the hook's env holds:
+# env_from_host / [env] values, and on byre 1.12+ `byre credentials` values
+# too -- the launcher exports delivered credentials BEFORE the firstrun hooks
+# (byre internal/gen/launcher.sh: byre_credentials_apply runs above the
+# firstrun loop, and again after env.d), so a credentials-delivered
+# XIAOMI_API_KEY stands this down. On byre <= 1.11 that export came only
+# after every firstrun hook, so such a box is still offered the login there;
+# Ctrl-C skips it.
 [ -n "${XIAOMI_API_KEY:-}" ] && exit 0
 # A MIMO_MODEL on another provider (the part before the first "/") is a
 # deliberate choice of that provider: the Xiaomi login is not what it needs.

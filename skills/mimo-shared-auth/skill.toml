@@ -59,7 +59,7 @@ shared_auth_for = "pjlsergeant/mimo"
 
 [package]
 id = "pjlsergeant/mimo-shared-auth"
-version = "1.1.0"
+version = "1.1.1"
 kind = "skill"
 package_api = 1
 requires_byre = ">=1.0.0"
@@ -84,7 +84,7 @@ scope = "machine"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "1750de17ae39fba85eefb74305fa36ae90a799c19c8f4e8a037fb3537a3e187b"
+sha256 = "4d340852c6d0114f8bbc1cedaa118532b6124f1bb42acc9c3125652222117e49"
 
 [[package.files]]
 src = "firstrun.sh"
