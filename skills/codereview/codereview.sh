@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # byre-codereview — an independent second-opinion review of the current changes.
 # Shipped by the codereview skill; pairs with a reviewer skill that installs the
-# reviewer binary: codex (the default), grok, claude, opencode, mimo, and/or zai.
+# reviewer binary: codex (the default), grok, claude, opencode, mimo, zai,
+# and/or vibe.
 # Reviews the working tree's git changes and prints findings, and appends them
 # to .byre-devlog/reviews.md.
 #
@@ -14,8 +15,9 @@
 #
 # BYRE_REVIEWER sets the default reviewer (codex when unset). A reviewer is
 # "harness" or "harness:model" — see the parsing below; every harness hands the
-# model to its own CLI's model flag, and a bare harness means that CLI's own
-# default. BYRE_REVIEW_TIMEOUT sets the default --timeout (none when unset).
+# model to its own CLI's model flag (vibe, which has none, to its active_model
+# setting), and a bare harness means that CLI's own default.
+# BYRE_REVIEW_TIMEOUT sets the default --timeout (none when unset).
 #
 # zai is the Z.AI (GLM) Codex wrapper: a reviewer under its OWN name, never a
 # silent fallback for codex. The Running line and reviews.md must say who
@@ -45,7 +47,7 @@ Usage:
   byre-codereview                        review current changes
   byre-codereview "focus area"           review current changes, focused on a topic
   byre-codereview --continue "..."       re-check after fixes (resumes prior session)
-  byre-codereview --reviewer <name> ...  choose the reviewer: codex (default) | grok | claude | opencode | mimo | zai
+  byre-codereview --reviewer <name> ...  choose the reviewer: codex (default) | grok | claude | opencode | mimo | zai | vibe
                                          alone, the reviewer runs its CLI's own default model;
                                          <name>:<model> pins one, passed to that CLI as-is:
                                            codex:gpt-5.6-sol     (no model-list command; a model the
@@ -58,6 +60,9 @@ Usage:
                                            mimo:xiaomi/mimo-v2.6-pro
                                            mimo:xiaomi-token-plan-sgp/mimo-v2.6-pro  (a Token Plan
                                                                  tp- key: pin its region's provider)
+                                           vibe:<alias>          (an alias from the box's
+                                                                 ~/.vibe/config.toml [[models]];
+                                                                 vibe has no --model flag)
                                          bare mimo instead pins what byre-mimo-model resolves
                                          (MIMO_MODEL, or a Token Plan key's region) and names it
                                          zai reviews through the isolated Z.AI Codex home (GLM)
@@ -112,7 +117,7 @@ for arg in "$@"; do
   esac
 done
 if [ "$expect_reviewer" = true ]; then
-  echo "byre-codereview: --reviewer needs a value: a harness (codex | grok | claude | opencode | mimo | zai)," >&2
+  echo "byre-codereview: --reviewer needs a value: a harness (codex | grok | claude | opencode | mimo | zai | vibe)," >&2
   echo "  optionally with a model as <harness>:<model> (e.g. claude:opus)." >&2
   exit 2
 fi
@@ -169,7 +174,8 @@ fi
 # and the reviews.md heading show what actually reviewed; $HARNESS drives
 # command lookup, session files, and dispatch. Every harness consumes the
 # model, each through its own CLI's flag (codex/zai/grok -m, claude --model,
-# opencode/mimo --model), on the fresh and resume paths alike. The model is
+# opencode/mimo --model; vibe has no model flag, so VIBE_ACTIVE_MODEL), on
+# the fresh and resume paths alike. The model is
 # passed through unvalidated: a model the CLI can't run must FAIL from that
 # CLI, never be swapped for its default while the log names the pinned one.
 # A bare harness passes no flag at all, so the CLI's own default applies.
@@ -185,9 +191,9 @@ case "$REVIEWER" in
 esac
 
 case "$HARNESS" in
-  codex|grok|claude|opencode|mimo|zai) ;;
+  codex|grok|claude|opencode|mimo|zai|vibe) ;;
   *)
-    echo "byre-codereview: unsupported reviewer '$HARNESS' (codex | grok | claude | opencode | mimo | zai," >&2
+    echo "byre-codereview: unsupported reviewer '$HARNESS' (codex | grok | claude | opencode | mimo | zai | vibe," >&2
     echo "  each optionally as <harness>:<model>, e.g. codex:gpt-5.6-sol)." >&2
     exit 2
     ;;
@@ -196,7 +202,7 @@ esac
 if ! command -v "$HARNESS" >/dev/null 2>&1; then
   echo "byre-codereview: $HARNESS not found on PATH." >&2
   echo "  Add the $HARNESS skill (skills = [\"$HARNESS\", \"codereview\"]) and rebuild." >&2
-  for other in codex grok claude opencode mimo zai; do
+  for other in codex grok claude opencode mimo zai vibe; do
     [ "$other" = "$HARNESS" ] && continue
     if command -v "$other" >/dev/null 2>&1; then
       echo "  ($other is available: byre-codereview --reviewer $other)" >&2
@@ -287,6 +293,21 @@ if [ "$HARNESS" = mimo ]; then
   fi
 fi
 
+# vibe pre-flight. VIBE_MCP_SERVERS goes, unconditionally and silently (the
+# mimo MIMOCODE_CONFIG_CONTENT rationale above): pjlsergeant/vibe's
+# byre-vibe-launch exports it into the AUTHORING vibe carrying byre's MCP
+# servers, this script runs as a child of that vibe's bash tool, and vibe
+# reads any config field from VIBE_<FIELD> above the user's config.toml
+# (vibe/core/config/default_orchestrator.py:68-78), so an inherited copy
+# would start the author's MCP servers inside the reviewer. Their tools could
+# not execute anyway (--enabled-tools, see run_vibe), but a stdio server is a
+# process the reviewer would spawn, and the review should not depend on that.
+# Everything else stays: the box's ~/.vibe config, its .env key, and any
+# VIBE_ACTIVE_MODEL the box exports (that IS this box's vibe default).
+if [ "$HARNESS" = vibe ]; then
+  unset VIBE_MCP_SERVERS
+fi
+
 # Persisted artifacts live in .byre-devlog/ at the repo root — a self-ignoring
 # dir (its own .gitignore is "*"), so the review log and agent diary persist via
 # the workspace mount but never land in git and need no per-project .gitignore
@@ -311,7 +332,8 @@ LOG_FILE="$REVIEW_DIR/reviews.md"
 # another provider's thread by accident — the ids validate, so nothing would
 # catch it. zai must be chosen by name, and its sessions kept apart.
 # Keyed by harness, not by model: a --continue with a different model resumes
-# the same thread (every CLI here applies the model per-prompt, not per-session).
+# the same thread (every CLI here applies the model per-prompt, not per-session,
+# except vibe, which keeps a thread's model; run_resume_vibe handles that).
 # That crossing is legitimate — handing a thread to a stronger model is a real
 # move — but it must be VISIBLE. So every harness's file has one shape: line 1
 # the session id, line 2 the reviewer string that started the thread, and
@@ -324,6 +346,9 @@ LOG_FILE="$REVIEW_DIR/reviews.md"
 # same shape as opencode's (it is a fork), so the separate file is what keeps
 # --continue from resuming an opencode thread in mimo's session store, or the
 # reverse — the ids would validate either way.
+# vibe's ids are UUID-shaped too (lowercase 8-4-4-4-12 hex, though not
+# RFC-4122), so its own file is again what keeps codex's/claude's/grok's
+# threads out of its session store.
 case "$HARNESS" in
   codex)    SESSION_FILE="$REVIEW_DIR/.review-session" ;;
   grok)     SESSION_FILE="$REVIEW_DIR/.review-session-grok" ;;
@@ -331,6 +356,7 @@ case "$HARNESS" in
   opencode) SESSION_FILE="$REVIEW_DIR/.review-session-opencode" ;;
   mimo)     SESSION_FILE="$REVIEW_DIR/.review-session-mimo" ;;
   zai)      SESSION_FILE="$REVIEW_DIR/.review-session-zai" ;;
+  vibe)     SESSION_FILE="$REVIEW_DIR/.review-session-vibe" ;;
 esac
 
 # The reviewer string that started this harness's saved thread (line 2 of the
@@ -423,7 +449,7 @@ OUT=$(mktemp "$REVIEW_DIR/.out.XXXXXX")
 DBG=$(mktemp "$REVIEW_DIR/.dbg.XXXXXX")
 cleanup() { rm -f "$OUT" "$DBG"; }
 
-# Every reviewer invocation goes through here, so --timeout covers all six
+# Every reviewer invocation goes through here, so --timeout covers all seven
 # harnesses on fresh and resume paths alike. Each call gets only what is LEFT
 # of the run's DEADLINE (see the parsing above), so a resume and the fresh
 # review it falls back to share one budget — the whole point. With nothing
@@ -474,7 +500,8 @@ exit_if_timed_out() {
 # Snapshot of the working tree the reviewer must not change. NOTE the limit of
 # what this can police: it covers the git working tree and nothing else. State
 # outside it — credentials (~/.codex/auth.json, ~/.grok, opencode's
-# ~/.local/share/opencode/auth.json, mimo's ~/.local/share/mimocode/auth.json),
+# ~/.local/share/opencode/auth.json, mimo's ~/.local/share/mimocode/auth.json,
+# vibe's ~/.vibe/.env),
 # other volumes, the rest of $HOME — is
 # invisible here, so a reviewer that clobbers a login is
 # caught by nobody (observed 2026-07-29: a reviewer ran `codex login
@@ -748,7 +775,7 @@ report_failure_zai() {
     else
       echo "  problem); the log gives no reset time. Do not rotate the key; wait for the reset" >&2
     fi
-    echo "  or use another reviewer (codex, grok, mimo)." >&2
+    echo "  or use another reviewer (codex, grok, mimo, vibe)." >&2
     echo "  Debug log: $DBG" >&2
   elif printf '%s' "$errs" | grep -qiE '"code"[[:space:]]*:[[:space:]]*401|token expired or incorrect|stream closed before response\.completed|unauthorized|invalid api key|api key|401'; then
     echo "byre-codereview: Z.AI may have rejected the request — an expired or" >&2
@@ -1487,6 +1514,483 @@ report_failure_mimo() {
   echo "  Debug log: $DBG" >&2
 }
 
+# vibe reviewer notes (Mistral Vibe; claims verified 2026-10-06 against vibe
+# 2.26.0, the release bundle run against a fake OpenAI-compatible backend,
+# and the source at github.com/mistralai/mistral-vibe, unless marked).
+# - INDEPENDENCE: vibe runs Mistral's models (Mistral Medium 3.5 by default),
+#   a different family from claude/codex/grok/GLM/MiMo. But the box's
+#   ~/.vibe/config.toml can point any [[models]] alias at any OpenAI-
+#   compatible endpoint, so the name says nothing about the model unless the
+#   box's config is checked.
+# - HARNESS: the bundle runs the closed-source "unified harness"
+#   (mistralai_vibe_local_harness) by default, -p included
+#   (vibe/_experimental_harness.py:122-136); --legacy-harness is upstream's
+#   temporary escape hatch and is never passed. Everything below describes the
+#   unified harness, as measured; the open source tree describes the legacy one.
+# - POSTURE, honest ordering as ever: the box boundary and the tripwire are
+#   what actually hold.
+#     no --trust   the --safe-mode / OPENCODE_DISABLE_PROJECT_CONFIG analogue:
+#                  an untrusted cwd loads none of the REVIEWED repo's .vibe/
+#                  config, hooks, skills, agents or tools, nor its AGENTS.md
+#                  (the prompt has the reviewer read that itself). vibe then
+#                  prints "Warning: <cwd> is not trusted; project configuration
+#                  (...) will be ignored ..." on stderr (vibe/cli/programmatic.py
+#                  :177-194): expected, never a failure. UNLESS the folder is
+#                  persistently trusted in ~/.vibe/trusted_folders.toml, which
+#                  the script warns about (vibe_warn_persistent_trust): an
+#                  interactive TUI "trust" answer writes the folder there
+#                  (vibe/core/trusted_folders.py:199-218, add_trusted
+#                  :327-333), and trust is the closest decision on the cwd's
+#                  ancestor walk (_closest_decision :281-292), so a recorded
+#                  repo root, OR AN ANCESTOR with nothing nearer untrusted, is
+#                  trusted here too, --trust or not. There is no switch to
+#                  drop the project layer: the harness hardcodes
+#                  sources=("user", "project") (vibe/app_server/server.py:235,
+#                  stdio.py:53-54). byre's own
+#                  agent launch passes --trust per invocation, which persists
+#                  nothing (vibe/cli/entrypoint.py:183-186), so the file only
+#                  gains entries from a TUI answer someone gave in this box.
+#     ~/.vibe/config.toml [[mcp_servers]]  Residual: the USER layer always
+#                  loads, so MCP servers the BOX's own config declares still
+#                  start inside the reviewer. Their tools cannot execute
+#                  (outside the --enabled-tools allowlist, below), but each
+#                  stdio server is a process the reviewer spawns. Only the
+#                  inherited VIBE_MCP_SERVERS copy is dropped (the pre-flight).
+#     --auto-approve --enabled-tools bash --enabled-tools read_file
+#     --disabled-tools write_file/edit/task/todo/cron/run_typescript
+#                  headless -p auto-DENIES every approval callback
+#                  (programmatic.py:160-163), so --auto-approve is what lets
+#                  the allowed tools run at all. Under the unified harness
+#                  --enabled-tools is an EXECUTION allowlist, not an
+#                  advertisement filter: write_file and edit stay in the tool
+#                  list, and a call answers "tool_denied: Tool execution denied
+#                  by approval policy" (verified: nothing written, also via
+#                  run_typescript's tools.file_system.write_file). There is no
+#                  grep tool (naming one is "unsupported top-level tool");
+#                  bash + rg does that job. bash stays, as for every harness,
+#                  so free-form writes remain possible: the tripwire's job.
+#                  MCP tools are outside the allowlist too.
+#                  The allowlist alone is not enough: an organisation's managed
+#                  config (AdminConfigLayer, fetched from chat.mistral.ai with
+#                  the Mistral key, vibe/core/config/admin_config.py:77) is the
+#                  HIGHEST layer (default_orchestrator.py:68-78) and
+#                  enabled_tools is WithReplaceMerge (vibe_schema.py:437), so
+#                  an org enabled_tools = ["*"] REPLACES ours and --auto-approve
+#                  then runs write_file and edit. disabled_tools is
+#                  WithConcatMerge (vibe_schema.py:445, applied "after
+#                  enabled_tools filtering"): no layer can remove an entry, so
+#                  the denylist survives a managed config. Verified on its own
+#                  (no --enabled-tools, --auto-approve): --disabled-tools
+#                  write_file denies a write_file call with the same tool_denied
+#                  and writes nothing, and also denies run_typescript's
+#                  tools.file_system.write_file; --disabled-tools edit likewise
+#                  for edit and tools.file_system.edit. Naming run_typescript
+#                  does NOT stop the outer call (denying only run_typescript,
+#                  its write_file ran and wrote), so its inner calls are gated
+#                  by the inner tool's name, which the list covers; it is
+#                  listed anyway, as are task (not advertised under the unified
+#                  harness), todo and cron. An unknown name is not an error.
+#                  Both lists stay (belt and braces). bash, and the bash-
+#                  equivalent process.* capabilities, remain: the tripwire.
+#     VIBE_*       env beats the user's config.toml (default_orchestrator.py:
+#                  68-78). Telemetry/Sentry, update checks, GrowthBook
+#                  experiments, the connectors catalog and notifications go
+#                  off for the run. VIBE_API_RETRY_MAX_ELAPSED_TIME=60: 429s,
+#                  5xx and network errors are retried until a wall-clock
+#                  budget runs out (vibe/core/llm/backend/generic.py:279-286,
+#                  default 300s, vibe/core/config/_defaults.py:17), and a run
+#                  that dies on a rate limit should say so in a minute, not
+#                  five; --timeout still bounds everything.
+# - The PROMPT rides stdin (cli.py:61-74; an argv prompt would win over it,
+#   cli.py:169-172, so none is passed).
+# - --output json prints the session history as one JSON array on stdout
+#   (PublicMessageEntry/PublicEffectEntry, vibe/app_server/models.py:959-992),
+#   every entry stamped with sessionId; stdout is empty on failure, which
+#   arrives as "Error: ..." on stderr with exit 1. Tool output stays inside
+#   effect entries, never on vibe's stderr (verified: a bash probe's output
+#   came back in .state.output), so stderr is CLI-owned and is what
+#   report_failure_vibe reads. run_vibe appends it to $DBG after a marker line.
+# - SESSIONS live under $REVIEW_DIR/.vibe-sessions (VIBE_SESSION_LOGGING__
+#   SAVE_DIR), kept across runs (inside the self-ignoring .byre-devlog, so
+#   outside the tripwire's snapshot and git), never in the box's ~/.vibe.
+#   VIBE_SESSION_LOGGING__ENABLED=true rides along (SessionLoggingConfig,
+#   vibe/core/config/models.py:99-118): a box config with [session_logging]
+#   enabled = false would route the session to a throwaway root discarded at
+#   close (vibe/app_server/_runtime.py:1329-1331, discard :1323), so no
+#   record would land here, --continue would have nothing to resume, and the
+#   pin check would fail closed with advice about aliases that does not apply.
+#   Layout: unified/<sid>/{CURRENT,meta.json,generations/<gen>/...}.
+#   `--resume <sid>` continues headless; an unknown id is "Error: Session not
+#   found: <id>", exit 1, no request made, and falls back to fresh as for every
+#   harness. -c/--continue is TTY/cwd-scoped, never used.
+# - MODEL: vibe has no --model flag. The model is config active_model, an
+#   ALIAS from [[models]], set here as VIBE_ACTIVE_MODEL. An alias vibe does
+#   not know FALLS BACK SILENTLY to the default model (vibe/core/config/
+#   vibe_schema.py:978-996: a log warning and a TUI-only validation warning):
+#   exit 0, empty stderr, a review by another model (verified). And on
+#   --resume the THREAD's stored model wins over VIBE_ACTIVE_MODEL (verified:
+#   a resume pinned to fakealias2 requested the thread's fake-model). So with
+#   a pin, vibe_pin_held reads the alias the run actually used back from the
+#   session store and fails a mismatch: the ONLY guard, since neither the exit
+#   code, stderr nor the json output carries the model.
+VIBE_STDERR_MARK='----- vibe stderr -----'
+
+# The two halves of $DBG. run_vibe writes vibe's stdout (the JSON history),
+# then the marker line, then vibe's stderr. The marker is preceded by its own
+# newline: vibe ends the json with one (vibe/cli/programmatic.py:109-110), but
+# the marker must start a line even if it did not, and the blank line that
+# normally results is harmless to jq and to these awk splits. The json output is indented, so no
+# line of it can equal the marker (a string holding it would be quoted and
+# indented); exact string compares, no regex.
+vibe_json_part()   { awk -v m="$VIBE_STDERR_MARK" '$0 == m { exit } { print }' "$DBG" 2>/dev/null || true; }
+vibe_stderr_part() { awk -v m="$VIBE_STDERR_MARK" 'f { print } $0 == m { f = 1 }' "$DBG" 2>/dev/null || true; }
+
+# Final report = the text of the last assistant message entry of the LAST
+# turn with any non-blank text. Scoped to the last turn because a resumed
+# run's json repeats the whole thread (verified): unscoped, a resume that ends
+# with no text would re-record the previous turn's report as the new one.
+# The turn is the last entry's turnId. A message's text is its text blocks
+# joined by blank lines, as PublicMessageEntry.text does (models.py:966-970);
+# a non-string text is coerced to "" so join cannot abort jq. NO output, not
+# "", when there is none (extract_ocfamily_report's reasoning: jq -r prints
+# "" as a newline, a 1-byte $OUT that defeats every [ -s "$OUT" ] guard).
+extract_vibe_report() {
+  vibe_json_part | jq -r '
+    if type != "array" or length == 0 then empty else
+      (.[-1].turnId) as $t
+      | [ .[] | objects
+          | select(.turnId == $t and .type == "message" and .role == "assistant")
+          | [ .content[]? | objects | select(.type == "text")
+              | (.text | if type == "string" then . else "" end) ] | join("\n\n")
+          | select(test("\\S")) ]
+      | last // empty
+    end' 2>/dev/null || true
+}
+
+extract_vibe_session() {
+  vibe_json_part | jq -r 'if type == "array" then ([ .[] | objects | .sessionId | strings ] | first // empty) else empty end' \
+    2>/dev/null || true
+}
+
+# The alias session $1 actually ran: CURRENT names the live generation, whose
+# runtime-state.json records .session_metadata.active_model (the session
+# store's layout, measured; meta.json has config: null). Both path parts are
+# validated before use: the id is UUID-shaped, the generation all digits.
+# Prints nothing when any step is missing.
+vibe_session_model() {
+  local sdir gen
+  valid_session_id "$1" || return 0
+  sdir="$REVIEW_DIR/.vibe-sessions/unified/$1"
+  gen=$(jq -r '.generation // empty' "$sdir/CURRENT" 2>/dev/null || true)
+  [[ "$gen" =~ ^[0-9]+$ ]] || return 0
+  jq -r '.session_metadata.active_model // empty | strings' \
+    "$sdir/generations/$gen/runtime-state.json" 2>/dev/null || true
+}
+
+# With a pin ($MODEL), true only when the run's session recorded exactly that
+# alias. Fails CLOSED: no session id, or a store this can't read, is a
+# failure too, since a review that cannot be shown to be the pinned model
+# must not be logged under its name. Sets VIBE_RAN_MODEL (what vibe used, or
+# "" when unknown) for report_failure_vibe. No pin: always true.
+VIBE_RAN_MODEL=""
+VIBE_PIN_FAILED=false
+vibe_pin_held() {
+  [ -n "$MODEL" ] || return 0
+  VIBE_RAN_MODEL=$(vibe_session_model "$1")
+  [ "$VIBE_RAN_MODEL" = "$MODEL" ] && return 0
+  VIBE_PIN_FAILED=true
+  return 1
+}
+
+# The entries of vibe's trust store $1, one per line: "T<TAB><path>" for
+# trusted, "U<TAB><path>" for untrusted, in file order. vibe writes it with
+# tomli_w as two top-level string arrays, trusted then untrusted
+# (vibe/core/trusted_folders.py:269-279), e.g.
+#     trusted = [
+#         "/workspace",
+#     ]
+#     untrusted = []
+# and reads it with tomllib (:252-267). There is no TOML parser in the box's
+# toolset, so this is a small tokenizer for exactly that grammar: bare
+# `key = [ "string", ... ]` pairs, '#' comments, single-line basic strings
+# with only \\ and \" escapes, and literal '...' strings. Anything else (a
+# table, a non-array value, a multi-line string, any other escape) exits 2:
+# the caller warns that the file could not be read, rather than guessing.
+# Other array-of-string keys are skipped, as tomllib's .get() does.
+vibe_trusted_folders_entries() {
+  awk '
+    { buf = buf $0 "\n" }
+    function bad() { exit 2 }
+    END {
+      n = length(buf); i = 1; st = "key"
+      while (i <= n) {
+        c = substr(buf, i, 1)
+        if (c == " " || c == "\t" || c == "\r" || c == "\n") { i++; continue }
+        if (c == "#") { while (i <= n && substr(buf, i, 1) != "\n") i++; continue }
+        if (st == "key") {
+          k = ""
+          while (i <= n && substr(buf, i, 1) ~ /[A-Za-z0-9_-]/) { k = k substr(buf, i, 1); i++ }
+          if (k == "") bad()
+          st = "eq"; continue
+        }
+        if (st == "eq")  { if (c != "=") bad(); i++; st = "lb"; continue }
+        if (st == "lb")  { if (c != "[") bad(); i++; st = "val"; continue }
+        if (st == "sep") {
+          if (c == ",") { i++; st = "val"; continue }
+          if (c == "]") { i++; st = "key"; continue }
+          bad()
+        }
+        # st == "val": a string, or the closing bracket (empty array, or
+        # after a trailing comma).
+        if (c == "]") { i++; st = "key"; continue }
+        s = ""
+        if (c == "\"") {
+          if (substr(buf, i, 3) == "\"\"\"") bad()
+          i++
+          while (1) {
+            if (i > n) bad()
+            c = substr(buf, i, 1)
+            if (c == "\n") bad()
+            if (c == "\"") { i++; break }
+            if (c == "\\") {
+              c = substr(buf, i + 1, 1)
+              if (c != "\\" && c != "\"") bad()
+              s = s c; i += 2; continue
+            }
+            s = s c; i++
+          }
+        } else if (c == "\047") {
+          if (substr(buf, i, 3) == "\047\047\047") bad()
+          i++
+          while (1) {
+            if (i > n) bad()
+            c = substr(buf, i, 1)
+            if (c == "\n") bad()
+            if (c == "\047") { i++; break }
+            s = s c; i++
+          }
+        } else bad()
+        if (k == "trusted") printf "T\t%s\n", s
+        else if (k == "untrusted") printf "U\t%s\n", s
+        st = "sep"
+      }
+      if (st != "key") bad()
+    }' "$1"
+}
+
+# Legibility, not a gate (the honest ordering: the box boundary and the
+# tripwire are what hold). Omitting --trust keeps the REVIEWED repo's .vibe/
+# config, hooks, skills and agents out of the review only while vibe's
+# persistent trust store does not cover the repo (see the vibe notes), so
+# say loudly when it does, and proceed. Mirrors vibe's own lookup: the store
+# is $VIBE_HOME/trusted_folders.toml, VIBE_HOME expanded and resolved,
+# default ~/.vibe (vibe/utils/vibe_home.py:7-13, vibe/core/paths/
+# _vibe_home.py:17); the cwd (the repo root here, physical as vibe's
+# resolve() makes it) and then each ancestor up to /, the closest decision
+# winning and trusted checked before untrusted at the same level
+# (vibe/core/trusted_folders.py:281-292). A missing or unreadable store is
+# "nothing trusted", as vibe treats it (it resets the file, :252-267);
+# a store this cannot parse says so. Read-only: vibe owns the file. Once
+# per run (a failed resume falls back to a fresh run_vibe).
+VIBE_TRUST_CHECKED=false
+vibe_warn_persistent_trust() {
+  [ "$VIBE_TRUST_CHECKED" = true ] && return 0
+  VIBE_TRUST_CHECKED=true
+  local vh tf entries dir kind path hit="" here
+  vh="${VIBE_HOME:-$HOME/.vibe}"
+  case "$vh" in "~"|"~/"*) vh="$HOME${vh#\~}" ;; esac
+  tf="$vh/trusted_folders.toml"
+  { [ -f "$tf" ] && [ -r "$tf" ]; } || return 0
+  if ! entries=$(vibe_trusted_folders_entries "$tf" 2>/dev/null); then
+    echo "byre-codereview: WARNING: could not read vibe's trust store $tf" >&2
+    echo "  (TOML this script does not parse), so it cannot tell whether this repo is persistently" >&2
+    echo "  trusted. If it is, the reviewed repo's .vibe/ config, hooks, skills and agents WILL load" >&2
+    echo "  into this review. Check the file in 'byre shell'. Proceeding." >&2
+    return 0
+  fi
+  here=$(pwd -P)
+  dir="$here"
+  while [ -z "$hit" ]; do
+    while IFS=$'\t' read -r kind path; do
+      [ "$path" = "$dir" ] && [ "$kind" = T ] && { hit="$dir"; break; }
+    done <<< "$entries"
+    [ -n "$hit" ] && break
+    while IFS=$'\t' read -r kind path; do
+      [ "$path" = "$dir" ] && [ "$kind" = U ] && return 0
+    done <<< "$entries"
+    [ "$dir" = / ] && return 0
+    dir="${dir%/*}"; [ -n "$dir" ] || dir=/
+  done
+  if [ "$hit" = "$here" ]; then
+    echo "byre-codereview: WARNING: vibe persistently trusts this repo: $tf lists" >&2
+    echo "  \"$hit\" (the repo root itself) under trusted." >&2
+  else
+    echo "byre-codereview: WARNING: vibe persistently trusts this repo: $tf lists" >&2
+    echo "  \"$hit\" (an ancestor of the repo root $here) under trusted." >&2
+  fi
+  echo "  So the REVIEWED repo's .vibe/ config, hooks, skills and agents (and its AGENTS.md) WILL" >&2
+  echo "  load into this review: omitting --trust does not isolate a trusted folder. The box" >&2
+  echo "  boundary and the tripwire still hold. To undo it, remove that entry from the trusted" >&2
+  echo "  list in $tf (in 'byre shell'). Proceeding." >&2
+}
+
+# Runs vibe and normalizes its two streams into the usual shape: $DBG = the
+# JSON history, the marker line, then stderr; $OUT = the extracted report.
+# Shared by fresh and resume, which differ only in --resume. Returns vibe's
+# exit code (or timeout's).
+run_vibe() {
+  local err rc=0
+  err=$(mktemp "$REVIEW_DIR/.err.XXXXXX")
+  vibe_warn_persistent_trust
+  printf '%s' "$PROMPT" | run_reviewer_cmd env VIBE_SESSION_LOGGING__SAVE_DIR="$REVIEW_DIR/.vibe-sessions" \
+      VIBE_SESSION_LOGGING__ENABLED=true VIBE_ENABLE_TELEMETRY=false VIBE_ENABLE_UPDATE_CHECKS=false VIBE_EXPERIMENTS__ENABLE=false \
+      VIBE_ENABLE_CONNECTORS=false VIBE_ENABLE_NOTIFICATIONS=false VIBE_API_RETRY_MAX_ELAPSED_TIME=60 \
+      ${MODEL:+VIBE_ACTIVE_MODEL="$MODEL"} \
+      vibe -p --auto-approve --enabled-tools bash --enabled-tools read_file \
+      --disabled-tools write_file --disabled-tools edit --disabled-tools task \
+      --disabled-tools todo --disabled-tools cron --disabled-tools run_typescript --output json "$@" \
+      > "$DBG" 2> "$err" || rc=$?
+  { printf '\n%s\n' "$VIBE_STDERR_MARK"; cat "$err"; } >> "$DBG" 2>/dev/null; rm -f "$err"
+  extract_vibe_report > "$OUT"
+  return "$rc"
+}
+
+run_fresh_vibe() {
+  rm -f "$SESSION_FILE"
+  announce_fresh
+  local rc=0; run_vibe || rc=$?
+  exit_if_timed_out "$rc" fresh
+  if [ "$rc" -ne 0 ]; then
+    # Partial-output courtesy, as everywhere (vibe's stdout is empty on the
+    # failures seen, so this rarely fires).
+    [ -s "$OUT" ] && cat "$OUT" >&2
+    report_failure_vibe
+    rm -f "$OUT" "$SESSION_FILE"; exit 1
+  fi
+  sid=$(extract_vibe_session)
+  # Before the empty-report check: a review by the wrong model is the more
+  # important thing to say, and its text is never shown or recorded.
+  if ! vibe_pin_held "$sid"; then
+    report_failure_vibe
+    rm -f "$OUT" "$SESSION_FILE"; exit 1
+  fi
+  # Exit 0 with no final message must not read as a clean review; raw callers
+  # may legitimately want no final text (codex's rationale).
+  if [ "$RAW" != true ] && [ ! -s "$OUT" ]; then
+    echo "byre-codereview: vibe exited 0 but produced no final message." >&2
+    report_failure_vibe
+    rm -f "$OUT" "$SESSION_FILE"; exit 1
+  fi
+  if [ -n "$sid" ] && valid_session_id "$sid"; then save_session "$sid"; else rm -f "$SESSION_FILE"; fi
+  cat "$OUT"; record_review; cleanup
+}
+
+run_resume_vibe() {
+  local sid="$1" rsid
+  warn_cross_reviewer_resume
+  announce_resume
+  local rc=0; run_vibe --resume "$sid" || rc=$?
+  exit_if_timed_out "$rc" resume
+  local pin_miss=false
+  if [ "$rc" -eq 0 ]; then
+    rsid=$(extract_vibe_session)
+    if ! vibe_pin_held "${rsid:-$sid}"; then
+      # vibe keeps a resumed thread on the model it started with (see the
+      # notes), so a pin the thread does not carry cannot be honoured by a
+      # resume. The fresh review it falls back to runs the pin, and its own
+      # check fails a pin vibe does not know. The resume itself worked, so
+      # this is not announced as a failed one.
+      echo "byre-codereview: vibe continued this thread on '${VIBE_RAN_MODEL:-an unknown model}', not the pinned '$MODEL'" >&2
+      echo "  (a resumed vibe thread keeps its own model); that turn is discarded." >&2
+      VIBE_PIN_FAILED=false; pin_miss=true
+    elif [ -s "$OUT" ]; then
+      cat "$OUT"; record_review; cleanup; return 0
+    elif [ "$RAW" = true ]; then
+      # A raw --continue may end with no final text: keep $DBG, which the
+      # notice points at (the codex/opencode resume handling).
+      echo "(could not extract final message; raw kept at: $DBG)"; rm -f "$OUT"; return 0
+    fi
+    # A built-in review with no report is a failure here too (mimo's
+    # handling): the fresh run's own failure path then names the fix.
+  fi
+  # Partial-output courtesy for a failed resume only; a wrong-model turn is
+  # never shown.
+  if [ "$rc" -ne 0 ] && [ -s "$OUT" ]; then cat "$OUT" >&2; fi
+  if [ "$pin_miss" = true ]; then
+    echo "A fresh review on the pinned '$MODEL' follows." >&2
+  else
+    echo "Resume failed — falling back to a fresh review." >&2
+  fi
+  rm -f "$SESSION_FILE"; VIBE_RAN_MODEL=""; run_fresh_vibe
+}
+
+# Advice-only, scoped to vibe's stderr (vibe_stderr_part, CLI-owned under
+# --output json), never the history: effect entries embed reviewer command
+# output, and a review of this very script quotes every pattern below (the
+# zai lesson, see codex_family_error_events). Shapes verified 2026-10-06
+# (vibe 2.26.0): "Error: Missing <VAR> environment variable for <provider>
+# provider. ...", "Error: Invalid API key (from env var <VAR>). ..." (a 401),
+# "Error: Client error '402 Payment Required' for url ...", "'429 Too Many
+# Requests'", "Error: Server error '500 Internal Server Error' ...", "Error:
+# Session not found: <id>". Order: the pin check's verdict first (exit 0, so
+# stderr is silent), then the resume miss, then auth, then funds and rate
+# limits, which are NOT key problems, then outages. `grep >/dev/null`, not -q:
+# the SIGPIPE-under-pipefail hole report_failure_mimo documents.
+report_failure_vibe() {
+  local errs var
+  errs=$(vibe_stderr_part)
+  # vibe's own words first, indented; the untrusted-cwd warning is not one.
+  { printf '%s\n' "$errs" | grep -E '^Error:' || true; } | sed 's/^/  /' >&2
+  if [ "$VIBE_PIN_FAILED" = true ]; then
+    if [ -n "$VIBE_RAN_MODEL" ]; then
+      echo "byre-codereview: vibe ran '$VIBE_RAN_MODEL', not the pinned '$MODEL', so the review was discarded." >&2
+      echo "  vibe silently falls back to its default model when an alias is not one it knows." >&2
+    else
+      echo "byre-codereview: could not confirm that vibe ran the pinned '$MODEL' (no session id or" >&2
+      echo "  session record in .byre-devlog/.vibe-sessions), so the review was discarded." >&2
+    fi
+    echo "  vibe takes a config ALIAS, not a provider model id: the aliases are the [[models]]" >&2
+    echo "  entries' alias = \"...\" in the box's ~/.vibe/config.toml. Pin one of those with" >&2
+    echo "  --reviewer vibe:<alias>, or run bare '--reviewer vibe' for the box's active_model." >&2
+  elif printf '%s' "$errs" | grep -E '^Error: Session not found' >/dev/null; then
+    echo "byre-codereview: vibe no longer has the saved review session." >&2
+  elif printf '%s' "$errs" | grep -E '^Error: (Missing [A-Za-z0-9_]+ environment variable|Invalid API key)' >/dev/null; then
+    var=$(printf '%s' "$errs" | grep -oE 'Missing [A-Za-z0-9_]+ environment variable|from env var [A-Za-z0-9_]+' \
+      | sed -n '1{s/^Missing //;s/ environment variable$//;s/^from env var //;p}' || true)
+    if [ -z "$var" ] || [ "$var" = MISTRAL_API_KEY ]; then
+      echo "byre-codereview: vibe has no usable Mistral API key (MISTRAL_API_KEY missing or rejected)." >&2
+      echo "  Set MISTRAL_API_KEY for the box: byre credentials, env_from_host, or the" >&2
+      echo "  pjlsergeant/vibe-shared-auth skill (asks once, exports it every launch). Or log in" >&2
+      echo "  once in another terminal: run 'byre shell', then 'vibe-login' (vibe's own onboarding;" >&2
+      echo "  it needs a terminal, so never from a tool call). A key from console.mistral.ai." >&2
+      if [ -n "$MODEL" ]; then
+        echo "  With a pin: an alias vibe does not know falls back to its default Mistral model," >&2
+        echo "  which is what needs this key — check that '$MODEL' is an alias in the box's" >&2
+        echo "  ~/.vibe/config.toml [[models]] first." >&2
+      fi
+    else
+      echo "byre-codereview: vibe's provider key $var is missing or was rejected. The box's" >&2
+      echo "  ~/.vibe/config.toml routes the model to a provider that reads it; set it in the" >&2
+      echo "  box's environment (byre credentials / env_from_host) or in ~/.vibe/.env." >&2
+    fi
+  elif printf '%s' "$errs" | grep -E "^Error: Client error '402" >/dev/null; then
+    echo "byre-codereview: vibe's provider refused for lack of credits (402 Payment Required)." >&2
+    echo "  The key works; this is NOT a key problem. Add credits or a plan to the Mistral" >&2
+    echo "  account (console.mistral.ai), or use another reviewer." >&2
+  elif printf '%s' "$errs" | grep -E "^Error: Client error '429" >/dev/null; then
+    echo "byre-codereview: vibe's provider rate-limited the review (429 Too Many Requests), still" >&2
+    echo "  after vibe's retries (capped at 60s here). NOT a key problem: retry later, or use" >&2
+    echo "  another reviewer." >&2
+  elif printf '%s' "$errs" | grep -E "^Error: Server error '5" >/dev/null; then
+    echo "byre-codereview: vibe's provider failed with a server error (5xx), still after vibe's" >&2
+    echo "  retries (capped at 60s here) — a provider outage, not a key problem. Retry later," >&2
+    echo "  or use another reviewer." >&2
+  else
+    echo "byre-codereview: review failed." >&2
+  fi
+  echo "  Debug log: $DBG" >&2
+}
+
 # Chooses which ADVICE a run that has ALREADY failed prints. Nothing here can
 # discard anything, which is exactly why it may read what the gate must not:
 # a wrong guess costs a wasted glance.
@@ -1520,11 +2024,14 @@ report_failure_grok() {
   fi
 }
 
-# Session-id validation is per-CLI. codex/zai/grok/claude ids are UUIDs, case-
+# Session-id validation is per-CLI. codex/zai/grok/claude/vibe ids are UUIDs, case-
 # folded here because historical session files vary in case. opencode and mimo
 # ids are ses_ + 12 hex + 14 base62 chars and case-SENSITIVE (mimo: id.ts:88,
 # live sample ses_ffe5f078b3f48ffe3Asi4Y6Y82) — folding one would corrupt it,
 # so that branch must never share the tr.
+# vibe ids ride the generic branch: lowercase 8-4-4-4-12 hex, UUID-shaped but
+# NOT RFC-4122 (the version/variant nibbles are arbitrary, e.g.
+# bc0cd530-1134-dd89-4a48-db039c69f144), so never tighten it to a v4 check.
 valid_session_id() {
   case "$HARNESS" in
     opencode|mimo) [[ "$1" =~ ^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$ ]] ;;

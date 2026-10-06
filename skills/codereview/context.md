@@ -5,7 +5,7 @@ byre placed this guidance here; it applies to every session in this box.
 ## Run a review after each feature or fix
 
 This box ships `byre-codereview` — an independent reviewer (Codex by default;
-`--reviewer grok|claude|opencode|mimo|zai` or `BYRE_REVIEWER=...` picks another
+`--reviewer grok|claude|opencode|mimo|zai|vibe` or `BYRE_REVIEWER=...` picks another
 installed one). After completing any feature or fix, run it yourself and act
 on the findings; don't ask permission first.
 
@@ -35,6 +35,7 @@ byre-codereview --reviewer codex:gpt-5.6-sol "..."
 byre-codereview --reviewer zai:glm-4.5 "..."
 byre-codereview --reviewer grok:<model> "..."   # `grok models` lists them
 byre-codereview --reviewer claude:opus "..."    # an alias or a full model id
+byre-codereview --reviewer vibe:<alias> "..."   # an alias from ~/.vibe/config.toml [[models]]
 ```
 
 `opencode models` / `mimo models` list what the box can run. `--reviewer mimo`
@@ -43,8 +44,11 @@ passes the model to its own CLI; a bare harness runs that CLI's own default,
 except bare `mimo`, which runs what `byre-mimo-model` resolves for the box
 (`MIMO_MODEL`, or a Token Plan key's detected region) and names it.
 A model the CLI can't run fails from the CLI — nothing is silently
-substituted. A `--continue` under a different model resumes the same thread,
-and the script notes the crossing.
+substituted (vibe would substitute one silently, so the script checks what it
+actually ran; see below). A `--continue` under a different model resumes the
+same thread, and the script notes the crossing — except under vibe, which
+keeps a thread on its own model, so there the script falls back to a fresh
+review on the pinned one.
 
 `--timeout <duration>` (or `BYRE_REVIEW_TIMEOUT`; coreutils syntax: `600`,
 `10m`, `1.5h`) stops the reviewer and its probes after that long and exits 124
@@ -65,7 +69,7 @@ review (Python byte-code caches from a reviewer's probes are suppressed).
 
 A **fresh** or **blinded** review means running **without `--continue`** — and
 that is the whole of what those words mean here. `--continue` resumes the
-reviewer's prior session (codex/zai `exec resume`, grok/claude `--resume`,
+reviewer's prior session (codex/zai `exec resume`, grok/claude/vibe `--resume`,
 opencode/mimo `--session`), so the reviewer still has its own earlier findings, and
 your replies to them, in context. That makes a resumed run a re-read of a conversation it is already
 invested in: it is prone to accept "fixed" at your word and to repeat its own
@@ -112,6 +116,12 @@ flow. It is still interactive, so the same rule applies — the user runs it in
 default model (`model` in the global opencode config); the review script names
 that fix when a run fails on it.
 
+vibe needs a Mistral API key (from console.mistral.ai): `MISTRAL_API_KEY` in
+the box's environment (byre credentials, env_from_host, or the
+`pjlsergeant/vibe-shared-auth` skill), or the user runs `vibe-login` in
+`byre shell` — vibe's own onboarding, which needs a terminal, so never from a
+tool call.
+
 ### mimo
 
 `mimo` is Xiaomi's MiMo Code, a fork of opencode with the same `run` surface,
@@ -154,6 +164,59 @@ persona kept trying to write scratch files outside the repo; mimo cut those
 reviews off with no report. mimo's scheduler is switched off
 for the review too, since it would leave a lock file in `.mimocode/`. A
 review should leave `git status` exactly as it found it.
+
+### vibe
+
+`vibe` is Mistral Vibe. It runs Mistral's models (Mistral Medium 3.5 by
+default) — a different family from claude/codex/grok/GLM/MiMo, so a real
+second opinion. But the name alone proves nothing: the box's
+`~/.vibe/config.toml` can point any model alias at any OpenAI-compatible
+endpoint, so check that config when independence matters.
+
+vibe has no `--model` flag. `vibe:<alias>` pins a config ALIAS — the
+`alias = "..."` of one of the box's `[[models]]` entries, set as vibe's
+`active_model` — not a provider model id. Bare `--reviewer vibe` runs the
+box's `active_model`. vibe does not reject an alias it doesn't know: it
+silently runs its default model instead, with exit status 0 and no error. So
+after every pinned run the script reads back the alias the run actually used
+(from the session record it keeps in `.byre-devlog/.vibe-sessions/`) and,
+when it isn't the pinned one, discards the review, records nothing, and names
+the problem. Without a Mistral key, a bad alias shows up instead as a missing
+`MISTRAL_API_KEY` (the default model is the one that needs it); the advice
+mentions that. A resumed vibe thread also keeps the model it started with, so
+`--continue` under a different pin falls back to a fresh review on that pin.
+
+The reviewer runs without `--trust`, so the reviewed repo's `.vibe/` config,
+hooks, skills and agents do not load (the analogue of claude's
+`--safe-mode`) — unless the folder is persistently trusted in
+`~/.vibe/trusted_folders.toml`, which the script warns about. That file
+gains an entry when someone answers "trust" in vibe's interactive TUI
+(byre's own launch passes `--trust` per run and records nothing). vibe
+takes the closest decision walking up from the repo root: a trusted entry for
+the root, or for a directory above it with nothing nearer marked untrusted,
+makes the repo trusted for every vibe run, the reviewer included; vibe has no
+switch to skip project config then. The warning names the file and the entry; remove that entry in
+`byre shell` to restore the isolation. Without such an entry vibe says so on
+stderr — "Warning: ... is not trusted; project configuration (...) will be
+ignored" — which is expected, never a failure. MCP servers declared in the
+box's own `~/.vibe/config.toml` (`[[mcp_servers]]`) still start inside the
+reviewer: the user config always loads. Their tools cannot run (they are
+outside the allowlist below), but they are processes the review spawns.
+
+Only `bash` and `read_file` may execute: edit and write tools stay
+advertised to the model, but calls to them are denied (there is no grep
+tool; the reviewer uses `rg` through bash). That allowlist
+(`--enabled-tools`) can be replaced wholesale by an organisation's managed
+vibe config, which vibe fetches with the Mistral key and ranks above every
+other setting, so the reviewer also passes a denylist (`--disabled-tools`
+for `write_file`, `edit`, `task`, `todo`, `cron` and `run_typescript`).
+Denylists from every config source are added together, so a managed config
+cannot remove these entries. They block write and edit calls on their own,
+including writes that `run_typescript` code makes through its file tools.
+`bash` stays allowed, so a determined reviewer can still write files: that
+is what the tripwire catches. A 402 is the account's credits
+and a 429 a rate limit (retried for up to a minute first), and neither is a
+key problem; the script says which.
 
 ### zai boxes: codex exists, its OpenAI login may not
 

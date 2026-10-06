@@ -1,0 +1,193 @@
+# Evidence status. LIVE-verified against the vibe 2.26.0 linux-x86_64
+# release bundle, run outside byre in the authoring box (2026-10-06,
+# ~/scratch/vibe-probe/REPORT.md, against a fake OpenAI-compatible
+# backend): the bundle runs on bookworm and through a symlink (REPORT.md G);
+# --trust/--auto-approve headless runs (A); the VIBE_MCP_SERVERS env layer
+# and that a stdio MCP server gets a MINIMAL env plus its `env` map, never
+# the parent's (B); --add-dir AGENTS.md delivery, symlinks followed, cwd
+# trusted or not (A, C); the failure texts (F). And, for this package,
+# byre-vibe-launch end to end (stdio + http injection, the x_byre_env
+# value mapping, the context merge and each degrade) and `vibe --setup`
+# driven in a pty down the paste-key path (it wrote $VIBE_HOME/.env 0600;
+# no keyring backend without a D-Bus session bus). SOURCE-verified against
+# the mistralai/mistral-vibe v2.26.0 tree (refs inline): the config layer
+# order, the runtime knobs below, the onboarding/browser sign-in flow. NOT
+# exercised: the image build (no docker in the authoring box; the download
+# RUN was simulated in bash against a temp prefix, real sha256sum -c), the
+# arm64 bundle beyond its sha256, a real Mistral API key or account (none
+# in the authoring box), browser sign-in against console.mistral.ai, and
+# the egress set through byre's firewall. Caveat: the bundle runs the
+# closed-source "Unified Harness" by default (REPORT.md 0); the tree's
+# vibe/core paths are the legacy harness, cited where the measured
+# behaviour matches them.
+
+[package]
+id = "pjlsergeant/vibe"
+version = "1.0.0"
+kind = "skill"
+package_api = 1
+requires_byre = ">=1.3.0"
+description = "The Mistral Vibe agent (Apache-2.0, binary `vibe`, pinned 2.26.0 release bundle); `vibe --setup` login (`vibe-login` in byre shell) or MISTRAL_API_KEY, persisted per project."
+
+[build]
+# curl + ca-certificates: the pinned download. unzip: the release asset is
+# a .zip. jq: byre-vibe-launch builds VIBE_MCP_SERVERS from the baked
+# /etc/byre/mcp.json with it. ripgrep: the unified harness has no grep tool
+# (REPORT.md C) -- search runs through its bash tool, where rg is the fast
+# path.
+apt = ["curl", "ca-certificates", "unzip", "jq", "ripgrep"]
+# vibe-launch.sh: the agent launch adapter -- MCP via VIBE_MCP_SERVERS,
+# context via --add-dir, then exec vibe (see its header).
+# vibe-login.sh: first-run auth hook (`vibe --setup`, guarded by
+# MISTRAL_API_KEY / vibe-shared-auth's key file / ~/.vibe/.env; skippable
+# with Ctrl-C).
+# vibe-login-cmd.sh: `vibe-login`, the by-hand login from `byre shell` -- a
+# thin wrapper of `vibe --setup` that refuses without a TTY (the
+# codex-login / mimo-login shape).
+# Payload COPYs land before this block's RUN lines; a fetched payload
+# carries no exec bit, hence the chmod.
+files = { "vibe-launch.sh" = "/usr/local/bin/byre-vibe-launch", "vibe-login.sh" = "/etc/byre/firstrun.d/vibe-login", "vibe-login-cmd.sh" = "/usr/local/bin/vibe-login" }
+dockerfile = [
+  # Install source: the GitHub release zip, not the official installer.
+  # That installer is `curl | bash` into uv + a PyPI install of
+  # mistral-vibe, which needs python>=3.12 (bookworm ships 3.11) and pins
+  # nothing. The zip is a self-contained PyInstaller onedir bundle (`vibe`
+  # + `_internal/`, its own libpython 3.12; no python needed), built in
+  # manylinux_2_28 containers (glibc>=2.28; bookworm has 2.36). Upstream
+  # publishes NO checksums: these sha256s were computed from the downloads
+  # on 2026-10-06 (the assets' own date) -- trust on first use, pinned
+  # thereafter, so a re-uploaded asset fails the build.
+  "RUN arch=\"$(dpkg --print-architecture)\" \\",
+  " && case \"$arch\" in \\",
+  "      amd64) varch=x86_64; sha=0e840ef752ca18c5a3ec1bf448702f40eaa137a3e39edd5544fb533ddb3fb35b ;; \\",
+  "      arm64) varch=aarch64; sha=9fb76933d1b7314d4df60b5720d52c6ffee9569e9efc36d2f6c79413691b5e7f ;; \\",
+  "      *) echo \"vibe: unsupported arch: $arch\" >&2; exit 1 ;; \\",
+  "    esac \\",
+  " && mkdir -p /tmp/vibe /opt/vibe \\",
+  " && curl -fsSL -o /tmp/vibe/vibe.zip \"https://github.com/mistralai/mistral-vibe/releases/download/v2.26.0/vibe-linux-${varch}-2.26.0.zip\" \\",
+  " && echo \"$sha  /tmp/vibe/vibe.zip\" | sha256sum -c - \\",
+  " && unzip -q /tmp/vibe/vibe.zip -d /opt/vibe \\",
+  " && rm -rf /tmp/vibe",
+  # Fail the BUILD loudly if the zip layout ever moves.
+  "RUN test -x /opt/vibe/vibe && test -d /opt/vibe/_internal",
+  # A symlink, not a copy: the onedir binary finds _internal/ beside its
+  # RESOLVED path (verified through a symlink on PATH, REPORT.md G).
+  "RUN ln -s /opt/vibe/vibe /usr/local/bin/vibe",
+  # Smoke: a bundle that cannot start (glibc, a missing .so) fails the build
+  # here, not at first launch. VIBE_HOME points at a throwaway dir: even
+  # --version bootstraps a home (vibehistory), and none belongs in the image.
+  "RUN VIBE_HOME=/tmp/vibe-smoke vibe --version && rm -rf /tmp/vibe-smoke",
+  # The baked fallback context dir byre-vibe-launch passes via --add-dir when
+  # its per-launch merge fails: one AGENTS.md symlinked to the baked agent
+  # context (dangling until the core block's later COPY lands -- fine,
+  # Docker allows it; vibe reads through the symlink at runtime, REPORT.md
+  # A). A dedicated dir so nothing else is picked up from it (the gemini
+  # skill's /etc/byre/context precedent).
+  "RUN mkdir -p /etc/byre/vibe-context && ln -s /etc/byre/agent-context.md /etc/byre/vibe-context/AGENTS.md",
+  "RUN chmod 0755 /usr/local/bin/byre-vibe-launch /usr/local/bin/vibe-login /etc/byre/firstrun.d/vibe-login",
+]
+
+[runtime]
+# Each knob is a Vibe config field set through its env layer (VIBE_<FIELD>,
+# nested with __), which sits ABOVE the user's ~/.vibe/config.toml
+# (vibe/core/config/default_orchestrator.py:68-78) -- so these hold even if
+# config.toml says otherwise; a user who wants one back overrides the env.
+# VIBE_ENABLE_TELEMETRY=false (enable_telemetry, default true,
+# vibe_schema.py:616): usage telemetry to api.mistral.ai AND Sentry crash
+# reporting, which is gated on the same field (vibe/cli/cli.py:497).
+# VIBE_ENABLE_UPDATE_CHECKS=false (enable_update_checks, default true,
+# vibe_schema.py:624): the image pins the version; the check would reach
+# pypi.org, which ships closed.
+# VIBE_EXPERIMENTS__ENABLE=false (ExperimentsConfig.enable, default true,
+# vibe/core/config/models.py:56-61): GrowthBook feature flags from
+# experiments.mistral.services, which ships closed -- and a remote layer
+# that can change behaviour under a pinned version.
+# VIBE_INCLUDE_COMMIT_SIGNATURE=false (include_commit_signature, default
+# true, vibe_schema.py:620): otherwise the system prompt tells the model to
+# end every commit with "Generated by Mistral Vibe." and a Co-Authored-By
+# trailer (vibe/core/system_prompt.py:240-250, :398) -- no agent
+# attribution in the user's history. (That section is the legacy
+# harness's; the unified harness's prompt in this box's runs carried no
+# such line either way -- set regardless, it costs nothing and covers both.)
+# TERM=xterm-256color: vibe's interactive UI is a Textual TUI, and docker's
+# -t defaults TERM=xterm (the gemini skill precedent).
+env = { VIBE_ENABLE_TELEMETRY = "false", VIBE_ENABLE_UPDATE_CHECKS = "false", VIBE_EXPERIMENTS__ENABLE = "false", VIBE_INCLUDE_COMMIT_SIGNATURE = "false", TERM = "xterm-256color" }
+# byre holds each env_docs value to one line, <=300 bytes; the longer
+# guidance lives in context.md. MISTRAL_API_KEY is the mistral provider's
+# api_key_env_var (DEFAULT_MISTRAL_API_ENV_KEY, vibe/core/config/
+# _defaults.py:10); a non-empty process value wins over ~/.vibe/.env
+# (load_dotenv_values, vibe_schema.py:99-114).
+env_docs.MISTRAL_API_KEY = "Mistral API key, alternative to the vibe --setup login; set via byre credentials or env_from_host, never [env]. Wins over ~/.vibe/.env. Any value in the env stands the login hook down (a byre credentials one only on byre 1.12+)."
+# Egress (443). api.mistral.ai = inference (DEFAULT_MISTRAL_SERVER_URL,
+# _defaults.py:13), plus the connectors catalog GET at startup
+# (connector_registry.py:111). console.mistral.ai = `vibe --setup`'s
+# browser sign-in (its start and poll calls go to
+# console.mistral.ai/api, _defaults.py:11-15; the user opens the URL on
+# the host). chat.mistral.ai = Vibe's web side (vibe_base_url,
+# _defaults.py:12): with a Mistral key set, vibe fetches the
+# organisation's managed config from it at every session start
+# (vibe/core/config/admin_config.py:77-91, 3 tries, 2 s timeout each).
+# Closed, centrally enforced settings are silently skipped and a dropping
+# firewall adds up to ~6 s to every launch. It is Mistral's own host and
+# a functional endpoint, so it ships open like api.mistral.ai; Vibe Code /
+# teleport also use it and are opt-in.
+egress = ["api.mistral.ai", "console.mistral.ai", "chat.mistral.ai"]
+# Offered, closed by default. experiments.mistral.services = GrowthBook
+# (also disabled by env above); pypi.org = the update check (disabled by
+# env above; the image pins the version anyway).
+egress_offered = ["experiments.mistral.services", "pypi.org"]
+
+[context]
+file = "context.md"
+
+[agent]
+# --trust: trust the cwd for this invocation only (not persisted to
+# trusted_folders.toml, vibe/cli/entrypoint.py:183-188; REPORT.md 0) -- the
+# box IS the trust boundary, and an untrusted cwd would silently skip the
+# project's .vibe/ config, hooks, skills, agents and AGENTS.md.
+# --auto-approve: select the auto-approve agent profile (entrypoint.py:144)
+# -- every tool call approved, the posture of every byre agent.
+# byre-vibe-launch injects MCP servers (VIBE_MCP_SERVERS) and the baked
+# agent context plus the session additions (an AGENTS.md in an --add-dir
+# dir) -- pure injection; byre writes nothing into ~/.vibe.
+command = "byre-vibe-launch --trust --auto-approve"
+mcp = "inject"
+context = "inject"
+state = ".vibe"
+
+# No host-seeded auth: log in per box via the firstrun hook or `vibe-login`
+# (the .vibe volume persists ~/.vibe/.env across rebuilds), supply
+# MISTRAL_API_KEY, or enable the optional pjlsergeant/vibe-shared-auth
+# companion, which exports one machine-wide key as MISTRAL_API_KEY.
+
+[[volumes]]
+name = ".vibe"
+role = "state"
+# VIBE_HOME (default ~/.vibe, vibe/utils/vibe_home.py:10-13): .env (the
+# login's key), config.toml, logs/ and logs/session/ (sessions),
+# trusted_folders.toml, vibehistory, agents/, prompts/, skills/,
+# worktrees/. Do NOT set VIBE_HOME via config [env]: vibe would follow,
+# this mount would not, and the login would stop surviving rebuilds.
+target = "/home/dev/.vibe"
+
+# Distribution payload list -- generated by `byre skill pack`.
+[[package.files]]
+src = "context.md"
+dest = "context.md"
+sha256 = "b61b48095451987a3434a0a0443ba437b1e502d775a728b23fb5ec44b3b618d5"
+
+[[package.files]]
+src = "vibe-launch.sh"
+dest = "vibe-launch.sh"
+sha256 = "2c175bdc9bf258c695282d9290d86c0c3daf1d2ce06dd0fe4a4b005ef709dcdc"
+
+[[package.files]]
+src = "vibe-login-cmd.sh"
+dest = "vibe-login-cmd.sh"
+sha256 = "f4cf2c15a38d873b61c9070710f7ac79c18e7d8a8b72c6a62ce1bc6dc7fe1d71"
+
+[[package.files]]
+src = "vibe-login.sh"
+dest = "vibe-login.sh"
+sha256 = "803bff9dbf6438124e757b3bf890578f5136754a1252b6aae0527d62136be875"
+

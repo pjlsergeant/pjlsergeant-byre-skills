@@ -29,16 +29,20 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 byre-codereview -- the independent second-opinion review loop.
 Reviewers: codex (default), grok, claude, opencode, zai (Z.AI/GLM, always
-under its own name -- never a silent codex fallback), and mimo (Xiaomi MiMo
-Code). Every reviewer takes a model as `<harness>:<model>` (e.g.
-`codex:gpt-5.6-sol`, `claude:opus`, `mimo:xiaomi/mimo-v2.6-pro`), and
-`--timeout <duration>` (or `BYRE_REVIEW_TIMEOUT`) bounds a run: exit 124,
-session kept on a timed-out `--continue`. mimo reviews run a dedicated
-read-only agent, so the tree is left untouched; a bare `--reviewer mimo`
-runs the model `byre-mimo-model` resolves for the box and names it.
+under its own name -- never a silent codex fallback), mimo (Xiaomi MiMo
+Code), and vibe (Mistral Vibe). Every reviewer takes a model as
+`<harness>:<model>` (e.g. `codex:gpt-5.6-sol`, `claude:opus`,
+`mimo:xiaomi/mimo-v2.6-pro`), and `--timeout <duration>` (or
+`BYRE_REVIEW_TIMEOUT`) bounds a run: exit 124, session kept on a timed-out
+`--continue`. mimo reviews run a dedicated read-only agent, so the tree is
+left untouched; a bare `--reviewer mimo` runs the model `byre-mimo-model`
+resolves for the box and names it. `vibe:<alias>` pins a config alias from
+the box's `~/.vibe/config.toml` `[[models]]` (not a provider model id), and
+the script reads back the model a pinned run actually used, because vibe
+silently substitutes its default for an unknown alias.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.14/skills/codereview/skill.toml --digest sha256:b9d46b0a562db58b6b289dfb0c0ddc790bcf4c3534824b188508b1a8f44452fa
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.15/skills/codereview/skill.toml --digest sha256:87e18825e75b6a47c7472a4b8cac36c62029fd1ab19c5c0d894c00af90793ab8
 ```
 
 ### pjlsergeant/toolbox
@@ -244,6 +248,58 @@ unused. The launch hook prints a notice while they exist; remove them with
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.14/skills/mimo-shared-auth/skill.toml --digest sha256:b32c81cd853fc822cb98b4323fc46083e66511ddd9e6408afb6c38d305add809
+```
+
+### pjlsergeant/vibe
+
+Mistral Vibe, Mistral AI's terminal coding agent (Apache-2.0), as a
+selectable byre agent: `agent = "pjlsergeant/vibe"`. The 2.26.0 release
+bundle (a self-contained PyInstaller onedir from GitHub releases) is pinned
+and sha256-verified at build and installed at `/opt/vibe`, with
+`/usr/local/bin/vibe` linked to it -- not via the official `curl | bash`
+installer, which needs uv and python>=3.12 and pins nothing. Upstream
+publishes no checksums, so the hashes were computed from the downloads.
+byre's MCP servers are injected through `VIBE_MCP_SERVERS` and the agent
+context through an `--add-dir` AGENTS.md; byre writes nothing into
+`~/.vibe`. Telemetry/Sentry, update checks, GrowthBook experiments and
+Vibe's own `Co-Authored-By` commit trailer are switched off by env. Auth is
+`vibe-login` in `byre shell` (it wraps `vibe --setup`: a browser sign-in
+that shows a URL to open on the host, or a pasted key from
+console.mistral.ai), offered once at first run and stored in the
+per-project `.vibe` state volume; or `MISTRAL_API_KEY` (a credential --
+`byre credentials set` or `env_from_host`, never a baked `[env]` literal).
+With the codereview skill, `byre-codereview --reviewer vibe` asks it for a
+second opinion.
+
+A vibe stdio MCP server does not inherit the agent's environment: it sees
+only the env names its `[[mcp]]` block declares. A stdio server that fails
+to start is reported nowhere by vibe -- run its command by hand in
+`byre shell` to see why.
+
+```
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.15/skills/vibe/skill.toml --digest sha256:b5572093adaf8c0e4de1975cb03bc6a5f373f13a4b096cd1b607a79bc2e79e3d
+```
+
+### pjlsergeant/vibe-shared-auth
+
+Optional companion for `pjlsergeant/vibe`: stores one Mistral API key in a
+machine-scoped identity volume (`~/.byre-identity/vibe/api-key`) and exports
+it as `MISTRAL_API_KEY` to every opted-in box. An explicit per-project
+`MISTRAL_API_KEY` takes precedence. It declares itself as
+`pjlsergeant/vibe`'s shared-auth companion, so byre offers it during
+onboarding and nests it beneath that agent in the config UI.
+
+A wrong or revoked key surfaces as `Error: Invalid API key (from env var
+MISTRAL_API_KEY)`. To rotate the shared key, run
+`rm ~/.byre-identity/vibe/api-key` inside `byre shell`, exit that shell
+immediately because it still exports the old value, then relaunch byre and
+paste the replacement at the first-run prompt. This rotates the
+machine-scoped credential for every opted-in project. An explicit project
+`MISTRAL_API_KEY` overrides the shared file, suppresses the prompt, and must
+instead be replaced at its source.
+
+```
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.15/skills/vibe-shared-auth/skill.toml --digest sha256:5a1f81d53fdd49840e27ccf80742830eb75aef132e5b91ee3ee8d53707147ae7
 ```
 
 ## Publishing a new version
