@@ -16,7 +16,7 @@ shared_auth_for = "pjlsergeant/vibe"
 
 [package]
 id = "pjlsergeant/vibe-shared-auth"
-version = "1.0.0"
+version = "1.0.1"
 kind = "skill"
 package_api = 1
 requires_byre = ">=1.0.0"
@@ -48,6 +48,6 @@ sha256 = "819f91677b6176b8b34ca44961eaf9e10c07e57e8f0aab37f4b20b948578be9e"
 [[package.files]]
 src = "firstrun.sh"
 dest = "firstrun.sh"
-sha256 = "85e472dce51c7074c462b4379cd943cd7cae32de1af69d77b685841b2fe31d70"
+sha256 = "cc68c4508c9f85f3e067c9d1d3ddbf5c8ebe85d1bb4d98b628f3b46a19ab9402"
 executable = true
 

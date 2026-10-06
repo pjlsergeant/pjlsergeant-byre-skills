@@ -14,7 +14,9 @@ immediately: its environment still contains the old exported value. Relaunch
 byre and enter the replacement at the first-run prompt. The later environment
 hook loads that new file for the agent launched in the same run.
 
-The shared file must remain a non-symlink regular file with mode `0600`. This
+The shared file must remain a non-symlink regular file with mode `0600`, and
+neither `~/.byre-identity` nor its `zai/` directory may be (or pass through)
+a symlink: a key reached that way is neither exported nor overwritten. This
 procedure changes the machine-scoped key used by every opted-in project. If the
 project explicitly supplies `ZAI_API_KEY`, the prompt is skipped and that value
 takes precedence; rotate it at its project or host source instead.

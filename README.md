@@ -19,7 +19,8 @@ preset here; it was walked back -- pick per project instead.)
 
 ### pjlsergeant/devlog
 
-Dev-workflow conventions: diary, devlog dir, scratch volume.
+Dev-workflow conventions -- diary, devlog dir, scratch volume. Enable with
+`skills = ["pjlsergeant/devlog"]`.
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.0/skills/devlog/skill.toml --digest sha256:9ecb65b18386ceea0dc54b7bb040b42e29a9872ab8fed4f9b1f86d5562926c12
@@ -27,28 +28,19 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 ### pjlsergeant/codereview
 
-byre-codereview -- the independent second-opinion review loop.
-Reviewers: codex (default), grok, claude, opencode, zai (Z.AI/GLM, always
-under its own name -- never a silent codex fallback), mimo (Xiaomi MiMo
-Code), and vibe (Mistral Vibe). Every reviewer takes a model as
-`<harness>:<model>` (e.g. `codex:gpt-5.6-sol`, `claude:opus`,
-`mimo:xiaomi/mimo-v2.6-pro`), and `--timeout <duration>` (or
-`BYRE_REVIEW_TIMEOUT`) bounds a run: exit 124, session kept on a timed-out
-`--continue`. mimo reviews run a dedicated read-only agent, so the tree is
-left untouched; a bare `--reviewer mimo` runs the model `byre-mimo-model`
-resolves for the box and names it. `vibe:<alias>` pins a config alias from
-the box's `~/.vibe/config.toml` `[[models]]` (not a provider model id), and
-the script reads back the model a pinned run actually used, because vibe
-silently substitutes its default for an unknown alias.
+byre-codereview, the independent second-opinion review loop: enable with
+`skills = ["pjlsergeant/codereview"]`. Reviewers are codex (default), grok,
+claude, opencode, zai, mimo, and vibe, each taking a model as
+`<harness>:<model>` (e.g. `codex:gpt-5.6-sol`, `claude:opus`).
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.15/skills/codereview/skill.toml --digest sha256:87e18825e75b6a47c7472a4b8cac36c62029fd1ab19c5c0d894c00af90793ab8
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.16/skills/codereview/skill.toml --digest sha256:3974128a244ec772dc92e5848a3cafac7ca2018373665f8e54d9d9b9ae35447b
 ```
 
 ### pjlsergeant/toolbox
 
-Baseline CLI tools for every box: ripgrep, fd, tree, less, procps, vim, and
-friends.
+Baseline CLI tools for every box -- ripgrep, fd, tree, less, procps, vim, and
+friends. Enable with `skills = ["pjlsergeant/toolbox"]`.
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.0/skills/toolbox/skill.toml --digest sha256:1b8627bca90e64e0a06c6dd80c2db9089f1bf5790541f76e409ad7f7b6c13cd2
@@ -57,13 +49,11 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 ### pjlsergeant/claude-skills-pocock
 
 Matt Pocock's Claude Code skill collection
-([github.com/mattpocock/skills](https://github.com/mattpocock/skills), MIT),
-repackaged as byre payloads: a firstrun hook syncs each skill into the Claude
-state volume at launch. Upstream's `code-review` is renamed
-`pocock-code-review` (name clash with a harness built-in). See
-`skills/claude-skills-pocock/LICENSE` for upstream's license and copyright.
-Since 1.0.1 the collection also carries `grilling`, pjlsergeant's own variant
-of upstream's grill-me (not part of the upstream collection).
+([github.com/mattpocock/skills](https://github.com/mattpocock/skills), MIT;
+see `skills/claude-skills-pocock/LICENSE`), plus pjlsergeant's own
+`grilling`. Enable with `skills = ["pjlsergeant/claude-skills-pocock"]`.
+Upstream's `code-review` is renamed `pocock-code-review`, as it clashes with
+a harness built-in.
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.1/skills/claude-skills-pocock/skill.toml --digest sha256:640fc098b8c1cdb03861884db804b20dc453e71903631135f4c1b4bf914a8422
@@ -71,15 +61,11 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 ### pjlsergeant/ngrok
 
-The `ngrok` CLI (installed from ngrok's own apt repo, since it's not in
-Debian's default repos), authenticated at launch from `NGROK_AUTHTOKEN`, plus
-ngrok's own `expose-localhost` Claude Skill
-([github.com/ngrok/agent-skills](https://github.com/ngrok/agent-skills),
-MIT) so the agent tunnels a local port well -- asking about a domain and
-access control before starting anything, wiring up OAuth/rate-limiting/OWASP
-via Traffic Policy on request -- instead of just running `ngrok http <port>`
-and stopping there. See `skills/ngrok/claude-skills/expose-localhost/LICENSE`
-for upstream's license and copyright.
+The `ngrok` CLI plus ngrok's own `expose-localhost` Claude Skill
+([github.com/ngrok/agent-skills](https://github.com/ngrok/agent-skills), MIT;
+see `skills/ngrok/claude-skills/expose-localhost/LICENSE`). Enable with
+`skills = ["pjlsergeant/ngrok"]` and supply `NGROK_AUTHTOKEN` via
+`byre credentials set` or `env_from_host`.
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.3/skills/ngrok/skill.toml --digest sha256:042c582921074a8325f1903481dfb2118343dd6aeea4ff57bd45a29329850764
@@ -87,14 +73,10 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 ### pjlsergeant/sudo
 
-Passwordless sudo for the `dev` user -- full root inside the box. The sudoers
-entry is written by a build-stage `RUN` (not shipped as a payload: sudo
-refuses group-writable sudoers files, and a COPYed payload would carry the
-checkout's umask bits), and `visudo -c` fails the build on a syntax error
-rather than shipping a box where sudo is broken. Root in the container grants
-nothing on the host beyond what the box's mounts and network already allow --
-but it does let the agent undo any in-image hardening, so don't pair it with
-boxes whose posture depends on the agent staying unprivileged.
+Passwordless sudo for the `dev` user -- full root inside the box. Enable with
+`skills = ["pjlsergeant/sudo"]`. It grants nothing on the host, but it does
+let the agent undo any in-image hardening, so keep it off boxes whose posture
+depends on the agent staying unprivileged.
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.5/skills/sudo/skill.toml --digest sha256:bb745f41b7e52fabb41caba45672fe1bd2c7ca678f287bdff648793da02f4204
@@ -102,14 +84,12 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 ### pjlsergeant/zai
 
-An isolated Z.AI agent that reuses byre's built-in Codex skill while giving
-Z.AI its own `CODEX_HOME`, config, sessions, and history. Select it with
-`agent = "pjlsergeant/zai"` **and** `skills = ["codex"]`; the latter is a
-mandatory prerequisite supplying both the executable and byre's MCP/context
-launch adapter. A fresh box therefore also shows Codex's ordinary OpenAI
-device-login prompt before Z.AI starts. That login is irrelevant to `zai` and
-may be skipped with Ctrl-C; its extra state volume and OpenAI egress are an
-accepted temporary cost of reusing the full built-in Codex skill.
+A Z.AI (GLM) agent built on byre's Codex skill, with its own isolated state.
+Select it with `agent = "pjlsergeant/zai"` **and** `skills = ["codex"]` --
+the latter is mandatory -- and supply `ZAI_API_KEY` via
+`byre credentials set` or `env_from_host`. A fresh box also shows the
+built-in Codex skill's OpenAI device-login prompt; Z.AI does not need it,
+so skip it with Ctrl-C.
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.7/skills/zai/skill.toml --digest sha256:4414671f6c43ff3b9f68763dc491458909c207e505145ce1a1908091e20601b9
@@ -117,46 +97,22 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 ### pjlsergeant/zai-shared-auth
 
-Optional companion for `pjlsergeant/zai`: stores one static Z.AI API key in a
-machine-scoped identity volume and exports it to every opted-in box. An
-explicit per-project `ZAI_API_KEY` takes precedence. It declares itself as
-`pjlsergeant/zai`'s shared-auth companion, so byre offers it during onboarding
-and nests it beneath that agent in the config UI.
-
-The Z.AI Responses endpoint may report an expired or incorrect key as a JSON
-`{"code":401,...}` body, which Codex can surface misleadingly as five
-reconnect attempts followed by `stream closed before response.completed`.
-To rotate the shared key, run `rm ~/.byre-identity/zai/api-key` inside
-`byre shell`, exit that shell immediately because it still exports the old
-value, then relaunch byre and enter the replacement at the first-run prompt.
-The later environment hook loads it for the agent in that same launch. This
-rotates the machine-scoped credential for every opted-in project. An explicit
-project `ZAI_API_KEY` overrides the shared file, suppresses the prompt, and
-must instead be replaced at its source.
+Optional companion for `pjlsergeant/zai`: one Z.AI API key, entered once,
+shared by every opted-in box on the machine. A per-project `ZAI_API_KEY`
+still wins.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.7/skills/zai-shared-auth/skill.toml --digest sha256:a3e87f18009297bf49a35943745e3896d354be66132102e94c585f988a74de8c
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.16/skills/zai-shared-auth/skill.toml --digest sha256:d61a961a3da8c16ceba9fb4d7233b86b94e6cafcf5505aaa6d7e5701a7e03386
 ```
 
 ### pjlsergeant/dogpark
 
 The `dogpark` Claude Skill from
 [github.com/pjlsergeant/dogpark](https://github.com/pjlsergeant/dogpark)
-(MIT, pjlsergeant's own -- see `skills/dogpark/claude-skills/dogpark/LICENSE`):
-lets an agent participate in a Dogpark message board -- catch up, post,
-escalate -- but only when the operator asks for it in a session; credentials
-sitting in the environment are deliberately not treated as that request.
-Claude agents load it natively; a `[context]` note reaches every other agent
-too, pointing at the baked SKILL.md and restating the only-when-asked gate.
-The client script and agent guide are fetched from your own Dogpark server
-at use time, so per project you supply `DOGPARK_URL` and `DOGPARK_KEY` (a
-credential -- `byre credentials set` or `env_from_host`, never a baked
-`[env]` literal) and, with a network-posture skill enabled,
-`egress = ["<your dogpark host>"]`. The client's read cursor defaults to
-`~/.local/state/dogpark`, which dies with the container: set `DOGPARK_STATE`
-to a persistent path (e.g. devlog's scratch volume) -- when you don't, the
-context note tells the agent to export that itself before running the
-client.
+(MIT; see `skills/dogpark/claude-skills/dogpark/LICENSE`): lets an agent use
+a Dogpark message board, only when asked to in a session. Enable with
+`skills = ["pjlsergeant/dogpark"]`, supply `DOGPARK_URL` and `DOGPARK_KEY` via
+`byre credentials set` or `env_from_host`, and allow egress to your server.
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/TAG-TO-FILL/skills/dogpark/skill.toml --digest sha256:DIGEST-TO-FILL
@@ -164,17 +120,11 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 ### pjlsergeant/prok
 
-The `frpc` client (fatedier/frp v0.71.0, pinned and sha256-verified at
-build) for a self-hosted prok relay: frps runs behind Cloudflare, and a box
-holding the shared token claims `https://<name>.<relay>` for exactly as long
-as its frpc process stays connected -- no DNS, cert, or cleanup per name.
-Per project you supply `PROK_AUTHTOKEN` (a credential -- `byre credentials
-set` or `env_from_host`, never a baked `[env]` literal) and `PROK_RELAY`
-(the relay's base hostname, not a secret) and, with a network-posture skill
-enabled, `egress = ["<your relay>"]` -- the control channel is a WebSocket
-to it on 443, nothing on 7000. The context note carries the naming rules
-and the warning that matters: names are public the moment they come up, so
-only throwaway services go through them.
+The `frpc` client for a self-hosted prok relay, which gives a box a public
+`https://<name>.<relay>` URL while it stays connected. Enable with
+`skills = ["pjlsergeant/prok"]`, set `PROK_RELAY`, supply `PROK_AUTHTOKEN`
+via `byre credentials set` or `env_from_host`, and allow egress to the relay.
+Names are public the moment they come up: only expose throwaway services.
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.9/skills/prok/skill.toml --digest sha256:04ef44e401768532c9370aa971e53b9903ae2d3f643ac0d4dfe830983f29fa9f
@@ -182,39 +132,12 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 ### pjlsergeant/mimo
 
-MiMo Code, Xiaomi's terminal coding agent (an OpenCode fork, MIT -- and also
+MiMo Code, Xiaomi's terminal coding agent (an OpenCode fork, MIT, also
 subject to upstream's
-[USE_RESTRICTIONS.md](https://github.com/XiaomiMiMo/MiMo-Code)), as a
-selectable byre agent: `agent = "pjlsergeant/mimo"`. The standalone `mimo`
-binary (0.1.15) is fetched from npm's per-platform packages, pinned and
-sha256-verified at build -- not via the official `curl | sh` installer,
-which pulls from a Xiaomi download host that publishes no checksums (and
-timed out from a box). byre's MCP servers and agent context are injected
-through `MIMOCODE_CONFIG_CONTENT`, composing with your own mimo config;
-autoupdate and upstream analytics are switched off. Auth is first and
-foremost mimo's own paste-code login, for platform and Token Plan accounts
-alike: a fresh box offers it at first run, or later run `mimo-login` in
-`byre shell` (it wraps `mimo auth login -p xiaomi`), open the URL it prints
-in a browser on the host, authorize, and paste the code back; `mimo auth
-whoami` shows the result. It persists per project in a state volume (or
-machine-wide, with `pjlsergeant/mimo-shared-auth`, below). The alternative is
-a static `XIAOMI_API_KEY` (a credential -- `byre credentials set` or
-`env_from_host`, never a baked `[env]` literal). The free anonymous MiMo
-channel has ended, and a platform account with no balance answers 402 --
-both while `mimo run` still exits 0.
-
-A Token Plan box using `XIAOMI_API_KEY` needs only the key. Token Plan keys
-(prefix `tp-`) work only on their regional `xiaomi-token-plan-{cn,ams,sgp}`
-provider (on mimo's default `xiaomi` provider a valid `tp-` key gets 401
-"Invalid API Key"), so
-the skill's `byre-mimo-model` resolver probes the three
-`token-plan-<region>.xiaomimimo.com` hosts (open with the skill) once,
-routes the agent and a bare `--reviewer mimo` to the region that accepts the
-key, and caches the answer per project in
-`~/.local/share/mimocode/byre-token-plan` (a key hash and the region, never
-the key). `MIMO_MODEL` (a plain `[env]` value, `provider/model`) overrides
-that choice for any key. Run `byre-mimo-model` in the box to see what it
-will run (no output: mimo's own default).
+[USE_RESTRICTIONS.md](https://github.com/XiaomiMiMo/MiMo-Code)), as a byre
+agent: `agent = "pjlsergeant/mimo"`. Log in with `mimo-login` in
+`byre shell`, or supply `XIAOMI_API_KEY` via `byre credentials set` or
+`env_from_host`. The free tier has ended: you need a paid account.
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.14/skills/mimo/skill.toml --digest sha256:0944e7a6022fc5b5b2bb241763e861ca22f45c028c9f12ca81f6f2c3705a40d4
@@ -222,29 +145,10 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 ### pjlsergeant/mimo-shared-auth
 
-Optional companion for `pjlsergeant/mimo`: one MiMo Code login for every
-project on the machine. mimo's `auth.json` becomes a symlink into a
-machine-scoped identity volume (`~/.byre-identity/mimo/auth.json`), re-asserted
-at every launch; mimo writes the file in place, so the first `mimo-login` in
-any box writes through the link and logs every opted-in box in, and
-`mimo auth logout` logs them all out. An existing per-project login is
-promoted to the shared file when there is none yet. Nothing is prompted for
-and nothing is exported; a project `XIAOMI_API_KEY` stays a separate,
-per-project credential. The file is shared whole; API-key-style entries (the
-Xiaomi login is one) are the only ones that share safely -- an OAuth entry in
-it is shared too and will race across boxes, so log that provider in with an
-API key instead (the launch hook warns about one and leaves it alone).
-Requires `pjlsergeant/mimo` 1.2.0+, whose login hook trusts the shared link;
-with an older one the launch hook warns and asserts nothing. It declares itself as `pjlsergeant/mimo`'s shared-auth
-companion, so byre offers it during onboarding and nests it beneath that
-agent in the config UI.
-
-Upgrading from 1.0, which asked for a pasted key: that prompt could not work
-with mimo's login (the pasted code is encrypted for the process that printed
-the URL), and its `~/.byre-identity/mimo/api-key` and `model` files are now
-unused. The launch hook prints a notice while they exist; remove them with
-`rm ~/.byre-identity/mimo/api-key ~/.byre-identity/mimo/model` in
-`byre shell`, then run `mimo-login`.
+Optional companion for `pjlsergeant/mimo` (1.2.0+): one MiMo Code login
+shared by every opted-in box on the machine. The whole `auth.json` is
+shared, every provider's entry included, so only API-key-style logins share
+safely (an OAuth entry would race across boxes).
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.14/skills/mimo-shared-auth/skill.toml --digest sha256:b32c81cd853fc822cb98b4323fc46083e66511ddd9e6408afb6c38d305add809
@@ -252,29 +156,10 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 ### pjlsergeant/vibe
 
-Mistral Vibe, Mistral AI's terminal coding agent (Apache-2.0), as a
-selectable byre agent: `agent = "pjlsergeant/vibe"`. The 2.26.0 release
-bundle (a self-contained PyInstaller onedir from GitHub releases) is pinned
-and sha256-verified at build and installed at `/opt/vibe`, with
-`/usr/local/bin/vibe` linked to it -- not via the official `curl | bash`
-installer, which needs uv and python>=3.12 and pins nothing. Upstream
-publishes no checksums, so the hashes were computed from the downloads.
-byre's MCP servers are injected through `VIBE_MCP_SERVERS` and the agent
-context through an `--add-dir` AGENTS.md; byre writes nothing into
-`~/.vibe`. Telemetry/Sentry, update checks, GrowthBook experiments and
-Vibe's own `Co-Authored-By` commit trailer are switched off by env. Auth is
-`vibe-login` in `byre shell` (it wraps `vibe --setup`: a browser sign-in
-that shows a URL to open on the host, or a pasted key from
-console.mistral.ai), offered once at first run and stored in the
-per-project `.vibe` state volume; or `MISTRAL_API_KEY` (a credential --
-`byre credentials set` or `env_from_host`, never a baked `[env]` literal).
-With the codereview skill, `byre-codereview --reviewer vibe` asks it for a
-second opinion.
-
-A vibe stdio MCP server does not inherit the agent's environment: it sees
-only the env names its `[[mcp]]` block declares. A stdio server that fails
-to start is reported nowhere by vibe -- run its command by hand in
-`byre shell` to see why.
+Mistral Vibe, Mistral AI's terminal coding agent (Apache-2.0), as a byre
+agent: `agent = "pjlsergeant/vibe"`. Log in with `vibe-login` in
+`byre shell`, or supply `MISTRAL_API_KEY` via `byre credentials set` or
+`env_from_host`.
 
 ```
 byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.15/skills/vibe/skill.toml --digest sha256:b5572093adaf8c0e4de1975cb03bc6a5f373f13a4b096cd1b607a79bc2e79e3d
@@ -282,24 +167,12 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 ### pjlsergeant/vibe-shared-auth
 
-Optional companion for `pjlsergeant/vibe`: stores one Mistral API key in a
-machine-scoped identity volume (`~/.byre-identity/vibe/api-key`) and exports
-it as `MISTRAL_API_KEY` to every opted-in box. An explicit per-project
-`MISTRAL_API_KEY` takes precedence. It declares itself as
-`pjlsergeant/vibe`'s shared-auth companion, so byre offers it during
-onboarding and nests it beneath that agent in the config UI.
-
-A wrong or revoked key surfaces as `Error: Invalid API key (from env var
-MISTRAL_API_KEY)`. To rotate the shared key, run
-`rm ~/.byre-identity/vibe/api-key` inside `byre shell`, exit that shell
-immediately because it still exports the old value, then relaunch byre and
-paste the replacement at the first-run prompt. This rotates the
-machine-scoped credential for every opted-in project. An explicit project
-`MISTRAL_API_KEY` overrides the shared file, suppresses the prompt, and must
-instead be replaced at its source.
+Optional companion for `pjlsergeant/vibe`: one Mistral API key, entered once,
+shared by every opted-in box on the machine. A per-project `MISTRAL_API_KEY`
+still wins.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.15/skills/vibe-shared-auth/skill.toml --digest sha256:5a1f81d53fdd49840e27ccf80742830eb75aef132e5b91ee3ee8d53707147ae7
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.16/skills/vibe-shared-auth/skill.toml --digest sha256:c6e36bea899a8732fb654017c11d9700919be3ee4a4fffde4ab2a451eb92404c
 ```
 
 ## Publishing a new version

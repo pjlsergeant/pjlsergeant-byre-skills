@@ -5,12 +5,36 @@
 identity_dir=${BYRE_IDENTITY_BASE:-/home/dev/.byre-identity}/zai
 key_file=$identity_dir/api-key
 
+[ -n "${ZAI_API_KEY:-}" ] && exit 0
+
 # Never follow a shared-volume symlink into this box's workspace or another
-# writable path. A valid stored credential is a non-symlink regular file.
+# writable path. The -L tests below see only the LEAF: a symlinked ANCESTOR
+# (~/.byre-identity itself, or its zai/ dir, pointing into the repo) would
+# carry the machine-wide key off the same way, so compare the physical path
+# of the nearest existing ancestor-or-self of the identity dir with its
+# spelling (no lexical prefix check; pjlsergeant/mimo-shared-auth's
+# firstrun.sh check) and refuse on any difference -- a dangling link or a
+# non-directory there fails the cd and is refused too. byre rejects BYRE_*
+# names in a project [env] (and env_from_host), so BYRE_IDENTITY_BASE is a
+# test seam, not a user footgun; a seam value must itself be a physical path.
+# Before the prompt: a key typed into a hook that then refuses is wasted.
+# Exit 0 here, never blocking the launch (the box can still receive
+# ZAI_API_KEY directly).
+probe=$identity_dir
+while [ ! -e "$probe" ] && [ ! -L "$probe" ]; do
+    probe=${probe%/*}
+    [ -n "$probe" ] || probe=/
+done
+if [ "$(cd "$probe" 2>/dev/null && pwd -P)" != "$probe" ]; then
+    echo "byre zai-shared-auth: refusing: $probe resolves through a symlink (or is not a directory) -- the shared Z.AI key is not read or saved this launch. Inspect it in byre shell." >&2
+    exit 0
+fi
+
+# A valid stored credential is a non-symlink regular file in that physical
+# dir.
 if [ -f "$key_file" ] && [ ! -L "$key_file" ] && [ -s "$key_file" ]; then
     exit 0
 fi
-[ -n "${ZAI_API_KEY:-}" ] && exit 0
 [ -t 0 ] || exit 0
 
 echo ""
@@ -38,6 +62,13 @@ mkdir -p "$identity_dir"
     echo "byre: shared Z.AI key path is not a directory: $identity_dir" >&2
     exit 1
 }
+# Again, now that the dir exists, right before the key is staged in it: the
+# pre-prompt check may have seen only an ancestor, and the prompt is a
+# window in which a link can be planted.
+[ "$(cd "$identity_dir" 2>/dev/null && pwd -P)" = "$identity_dir" ] || {
+    echo "byre: refusing: shared Z.AI key directory resolves through a symlink: $identity_dir" >&2
+    exit 1
+}
 umask 077
 tmp_key=$(mktemp "$identity_dir/.api-key.XXXXXX") || {
     echo "byre: could not stage shared Z.AI key" >&2
@@ -47,8 +78,29 @@ trap 'if [ -n "$tmp_key" ]; then rm -f -- "$tmp_key"; fi' EXIT HUP INT TERM
 printf '%s\n' "$key" > "$tmp_key"
 chmod 0600 "$tmp_key"
 # rename(2) replaces a hostile api-key symlink itself; unlike shell
-# redirection, it never follows that symlink to its target.
-mv -f -- "$tmp_key" "$key_file"
+# redirection, it never follows that symlink to its target. A planted
+# DIRECTORY would swallow the mv instead -- POSIX mv moves the file INTO
+# it, and reports SUCCESS -- so probe with -d first (BSD mv has no -T;
+# -d follows symlinks, covering the symlink-to-directory arm), and re-check
+# AFTER the mv that api-key is a regular non-symlink file. A directory
+# landing between probe and mv still wins that race: one copy of the key is
+# left inside the planted directory (as .api-key.XXXXXX; through a link,
+# that may be outside the identity volume), protected only by its own 0600
+# mode, and this hook reports it NOT saved rather than "saved".
+# A failed mv exits before tmp_key is cleared, so the EXIT trap removes
+# the staged file.
+[ ! -d "$key_file" ] || {
+    echo "byre: refusing: shared Z.AI key path is a directory (or a link to one): $key_file -- key not saved. Inspect it in byre shell." >&2
+    exit 1
+}
+mv -f -- "$tmp_key" "$key_file" || {
+    echo "byre: shared Z.AI key was NOT saved: could not move it into place" >&2
+    exit 1
+}
 tmp_key=
+[ -f "$key_file" ] && [ ! -L "$key_file" ] || {
+    echo "byre: shared Z.AI key was NOT saved: $key_file is not a regular file after the move. Inspect it in byre shell." >&2
+    exit 1
+}
 trap - EXIT HUP INT TERM
 echo "byre: saved. This launch will use it; other running boxes pick it up when relaunched."

@@ -5,7 +5,7 @@ shared_auth_for = "pjlsergeant/zai"
 
 [package]
 id = "pjlsergeant/zai-shared-auth"
-version = "1.0.0"
+version = "1.0.1"
 kind = "skill"
 package_api = 1
 requires_byre = ">=1.0.0"
@@ -27,15 +27,16 @@ scope = "machine"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "8b77139a4bad993846d869811b3f1b57e97b0cd2bc1bb207a9df8ef449ca1bdc"
+sha256 = "d2fa1a10c5c95116cc936508850b07870c98440752a2cc2fb289242ab5673596"
 
 [[package.files]]
 src = "env.sh"
 dest = "env.sh"
-sha256 = "cbf010ac99f005082a89c3a36015be91ac1ac0e53d0411a90a3ba8037e1c1916"
+sha256 = "4ee9b21cd8e0bf6c12e57ac9c1ec95bd935cb0ef18449bcaa53ad15f4640e42e"
 
 [[package.files]]
 src = "firstrun.sh"
 dest = "firstrun.sh"
-sha256 = "aa2f67a1f36c77d79c04e5ea69520c9eb7aa2d129b62b40bf75f6e6d7e81918d"
+sha256 = "daa7f22945a8e394d00b50b1815489cab222c01b45922476bd1df0043d456474"
 executable = true
+

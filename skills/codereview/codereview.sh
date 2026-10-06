@@ -2015,6 +2015,15 @@ report_failure_grok() {
     echo "  'grok models' lists the ones it can run; pin one with --reviewer grok:<model>," >&2
     echo "  or run bare '--reviewer grok' for its default." >&2
     echo "  Debug log: $DBG" >&2
+  # Out of funds, observed live 2026-10-06 (grok 1.0.46): exit 1, and STDERR
+  # ($DBG) holds `Internal error: { "message": "API error (status 402 Payment
+  # Required): Grok Build usage balance exhausted", "http_status": 402 }`.
+  # Checked BEFORE the auth advice: the login works, and re-login won't help.
+  elif grep -qiE '402 Payment Required|usage balance exhausted|"http_status": *402' "$DBG" 2>/dev/null; then
+    echo "byre-codereview: grok's provider refused for lack of funds (402: Grok Build usage balance exhausted)." >&2
+    echo "  The login works — this is NOT an auth problem. Top up the Grok Build balance" >&2
+    echo "  in the xAI console, or use another reviewer (--reviewer ...)." >&2
+    echo "  Debug log: $DBG" >&2
   elif auth_advice "$DBG" || opens_like_auth "$OUT"; then
     echo "byre-codereview: grok may need re-authentication (its ~6h tokens refresh silently until the chain dies)." >&2
     echo "  Run 'byre shell', then: grok-login (or: grok login --device-auth)" >&2

@@ -89,11 +89,16 @@ chmod 0600 "$tmp_key"
 # left inside the planted directory (as .api-key.XXXXXX; through a link,
 # that may be outside the identity volume), protected only by its own 0600
 # mode, and this hook reports it NOT saved rather than "saved".
+# A failed mv exits before tmp_key is cleared, so the EXIT trap removes
+# the staged file.
 [ ! -d "$key_file" ] || {
     echo "byre: refusing: shared Mistral key path is a directory (or a link to one): $key_file -- key not saved. Inspect it in byre shell." >&2
     exit 1
 }
-mv -f -- "$tmp_key" "$key_file"
+mv -f -- "$tmp_key" "$key_file" || {
+    echo "byre: shared Mistral key was NOT saved: could not move it into place" >&2
+    exit 1
+}
 tmp_key=
 [ -f "$key_file" ] && [ ! -L "$key_file" ] || {
     echo "byre: shared Mistral key was NOT saved: $key_file is not a regular file after the move. Inspect it in byre shell." >&2
