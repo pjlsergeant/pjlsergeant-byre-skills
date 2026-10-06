@@ -162,17 +162,17 @@ agent: `agent = "pjlsergeant/vibe"`. Log in with `vibe-login` in
 `env_from_host`.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.17/skills/vibe/skill.toml --digest sha256:bc22f21aa861ada6a0c586b82e49d9bb3b2e91ed41b43c553d126f909226a89b
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.18/skills/vibe/skill.toml --digest sha256:f489a4cefb30652f9322dc0d3192f404db7083e52fbd0d50199e7855a78151a3
 ```
 
 ### pjlsergeant/vibe-shared-auth
 
-Optional companion for `pjlsergeant/vibe`: one Mistral API key, entered once,
-shared by every opted-in box on the machine. A per-project `MISTRAL_API_KEY`
-still wins.
+Optional companion for `pjlsergeant/vibe`: the Mistral login this project
+already has (or a key entered once) is shared by every opted-in box on the
+machine. A per-project `MISTRAL_API_KEY` still wins.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.16/skills/vibe-shared-auth/skill.toml --digest sha256:c6e36bea899a8732fb654017c11d9700919be3ee4a4fffde4ab2a451eb92404c
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.18/skills/vibe-shared-auth/skill.toml --digest sha256:c094ac3b7a1ef7e312facc9b0de8f1d38bac4788087932aa7f991d561e90f3ec
 ```
 
 ## Publishing a new version

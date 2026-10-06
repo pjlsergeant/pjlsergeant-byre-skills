@@ -9,6 +9,11 @@ shared_auth_for = "pjlsergeant/vibe"
 # process value wins, vibe/core/config/vibe_schema.py:99-114), so sharing
 # the VARIABLE is enough -- nothing is linked into the .vibe volume, and
 # pjlsergeant/vibe's login hook trusts no symlink at ~/.vibe/.env.
+# 1.1.0: firstrun.sh also PROMOTES an existing per-project login (the key
+# vibe-login's browser sign-in wrote to ~/.vibe/.env, never shown to the
+# user) into the shared file when there is none yet -- the
+# pjlsergeant/mimo-shared-auth precedent, by value, not by link (dotenv's
+# set_key rewrites .env via temp+rename, which would replace a link).
 # LIVE-verified in the authoring box (2026-10-06): env.sh's export, its
 # respect for a pre-set key, its refusal of a symlinked/empty file, and
 # firstrun.sh's non-TTY stand-down. NOT exercised: a byre box mounting the
@@ -16,11 +21,11 @@ shared_auth_for = "pjlsergeant/vibe"
 
 [package]
 id = "pjlsergeant/vibe-shared-auth"
-version = "1.0.1"
+version = "1.1.0"
 kind = "skill"
 package_api = 1
 requires_byre = ">=1.0.0"
-description = "Share one Mistral API key across byre projects that use pjlsergeant/vibe."
+description = "Share one Mistral login (API key) across byre projects that use pjlsergeant/vibe."
 
 [build]
 files = { "firstrun.sh" = "/etc/byre/firstrun.d/00-vibe-shared-auth", "env.sh" = "/etc/byre/env.d/50-vibe-shared-auth.sh" }
@@ -38,7 +43,7 @@ scope = "machine"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "e43722f6f3d49586129d00e368e96ce451e2ba41256065f0af5b66576615331c"
+sha256 = "1398f607f38784917eaf5e1b865f46b55dfe8aaf7517a63b1a47cf6f3e929a31"
 
 [[package.files]]
 src = "env.sh"
@@ -48,6 +53,6 @@ sha256 = "819f91677b6176b8b34ca44961eaf9e10c07e57e8f0aab37f4b20b948578be9e"
 [[package.files]]
 src = "firstrun.sh"
 dest = "firstrun.sh"
-sha256 = "cc68c4508c9f85f3e067c9d1d3ddbf5c8ebe85d1bb4d98b628f3b46a19ab9402"
+sha256 = "199ca328eff4bce55a81f31d7029e62a175346df687e3f1b0517c06490dd57b5"
 executable = true
 

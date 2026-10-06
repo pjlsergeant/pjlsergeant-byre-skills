@@ -38,7 +38,9 @@ fi
 echo "Choose 'Launch browser' and open the sign-in URL it shows in a browser on your HOST"
 echo "(the URL appears after a few seconds; press 'c' to copy it),"
 echo "or 'Use an API key' and paste a Mistral API key (console.mistral.ai)."
-echo "Stored for this project only (~/.vibe/.env; it survives rebuilds)."
+echo "Stored for this project (~/.vibe/.env; it survives rebuilds). (With pjlsergeant/vibe-shared-auth"
+echo "enabled and no shared key yet, the next launch shares this login; to replace an existing"
+echo "shared key, remove ~/.byre-identity/vibe/api-key in byre shell first.)"
 if [ -n "${MISTRAL_API_KEY:-}" ]; then
   echo "Note: MISTRAL_API_KEY is set in this environment and wins over the stored key."
 fi

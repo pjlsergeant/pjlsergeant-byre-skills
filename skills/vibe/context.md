@@ -30,9 +30,13 @@ in `~/.vibe/config.toml` (Mistral Medium 3.5 by default); vibe has no
   the environment wins over `~/.vibe/.env`, and makes the first-run login
   stand down (a `byre credentials` value only on byre 1.12+; older byre
   delivered those after the first-run hooks).
-- `pjlsergeant/vibe-shared-auth`, if enabled, stores one key machine-wide
-  and exports it as `MISTRAL_API_KEY` in every opted-in project (unless the
-  project sets its own).
+- `pjlsergeant/vibe-shared-auth`, if enabled, shares one key machine-wide:
+  its first launch promotes this project's `~/.vibe/.env` login (or asks
+  for a key when there is none), and it exports that key as
+  `MISTRAL_API_KEY` in every opted-in project (unless the project sets its
+  own). Only while no shared key exists: once one does, it keeps winning
+  and shadows a fresh `vibe-login` here -- to replace it, remove
+  `~/.byre-identity/vibe/api-key` in `byre shell` first.
 - No key at all: `vibe -p` fails with "Missing MISTRAL_API_KEY environment
   variable for mistral provider"; a bad one with "Invalid API key". 402 and
   429 are billing/quota answers, not key problems; 429 and 5xx are retried
