@@ -95,12 +95,16 @@ trap 'echo; echo "byre: vibe login skipped. To do it later, open another termina
 
 echo ""
 echo "=== byre: first-run Mistral Vibe login ==="
-echo "Choose 'Launch browser' and open the sign-in URL it shows in a browser on your host,"
+echo "Choose 'Launch browser' and open the sign-in URL it shows in a browser on your host"
+echo "(the URL appears after a few seconds; press 'c' to copy it),"
 echo "or 'Use an API key' and paste a Mistral API key (console.mistral.ai)."
 echo "Stored per-project, survives rebuilds. Ctrl-C to skip (or set MISTRAL_API_KEY instead,"
 echo "or enable pjlsergeant/vibe-shared-auth to share one key across projects)."
 echo "Later, or again: 'vibe-login' in 'byre shell' (it wraps 'vibe --setup')."
 echo ""
+# No browser in a box: without this, Vibe's sign-in aborts before it ever
+# polls. Rationale and source refs: skill.toml [runtime], BROWSER=true.
+export BROWSER=true
 # Bound the wait; --foreground keeps vibe in the terminal's foreground
 # process group so Ctrl-C reaches it immediately.
 TO=""

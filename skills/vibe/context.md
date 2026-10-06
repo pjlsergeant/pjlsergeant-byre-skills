@@ -21,6 +21,10 @@ in `~/.vibe/config.toml` (Mistral Medium 3.5 by default); vibe has no
   takes a pasted key (console.mistral.ai). Either way the result is a
   Mistral API key in `~/.vibe/.env` (per project; there is no keyring in a
   box). A fresh interactive box offers it once at first run (Ctrl-C skips).
+  The skill sets `BROWSER=true` so "Launch browser" proceeds without a
+  browser in the box: the sign-in URL appears after a few seconds and `c`
+  copies it (otherwise vibe aborts with "Failed to open browser for
+  sign-in." and never notices the sign-in finishing on the host).
 - Or a static key: `MISTRAL_API_KEY` (a credential: `byre credentials set`
   or `env_from_host`, never a baked `[env]` literal). A non-empty value in
   the environment wins over `~/.vibe/.env`, and makes the first-run login
@@ -56,6 +60,10 @@ move, the volume would not, and the login would stop surviving rebuilds.
 - `VIBE_INCLUDE_COMMIT_SIGNATURE=false` -- no "Co-Authored-By: Mistral
   Vibe" trailer on commits vibe makes.
 - `TERM=xterm-256color` -- for the Textual TUI.
+- `BROWSER=true` -- there is no browser in a box; this lets vibe's browser
+  sign-in carry on and poll instead of aborting (its connector/MCP OAuth
+  screens then say "Opened in browser." when nothing opened -- copy the
+  URL instead).
 
 Any Vibe config field can be set as `VIBE_<FIELD>` (nested with `__`,
 JSON for lists); the environment layer sits ABOVE `~/.vibe/config.toml`,

@@ -162,7 +162,7 @@ agent: `agent = "pjlsergeant/vibe"`. Log in with `vibe-login` in
 `env_from_host`.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.15/skills/vibe/skill.toml --digest sha256:b5572093adaf8c0e4de1975cb03bc6a5f373f13a4b096cd1b607a79bc2e79e3d
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.17/skills/vibe/skill.toml --digest sha256:bc22f21aa861ada6a0c586b82e49d9bb3b2e91ed41b43c553d126f909226a89b
 ```
 
 ### pjlsergeant/vibe-shared-auth

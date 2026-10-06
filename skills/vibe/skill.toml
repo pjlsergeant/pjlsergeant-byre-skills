@@ -16,14 +16,17 @@
 # RUN was simulated in bash against a temp prefix, real sha256sum -c), the
 # arm64 bundle beyond its sha256, a real Mistral API key or account (none
 # in the authoring box), browser sign-in against console.mistral.ai, and
-# the egress set through byre's firewall. Caveat: the bundle runs the
-# closed-source "Unified Harness" by default (REPORT.md 0); the tree's
-# vibe/core paths are the legacy harness, cited where the measured
-# behaviour matches them.
+# the egress set through byre's firewall. BROWSER=true (below): its effect
+# on Python's webbrowser.open -- runs `true <url>`, returns True -- was
+# verified with the authoring box's python (2026-10-07); the full browser
+# sign-in through it against console.mistral.ai is still NOT exercised.
+# Caveat: the bundle runs the closed-source "Unified Harness" by default
+# (REPORT.md 0); the tree's vibe/core paths are the legacy harness, cited
+# where the measured behaviour matches them.
 
 [package]
 id = "pjlsergeant/vibe"
-version = "1.0.0"
+version = "1.0.1"
 kind = "skill"
 package_api = 1
 requires_byre = ">=1.3.0"
@@ -111,7 +114,28 @@ dockerfile = [
 # such line either way -- set regardless, it costs nothing and covers both.)
 # TERM=xterm-256color: vibe's interactive UI is a Textual TUI, and docker's
 # -t defaults TERM=xterm (the gemini skill precedent).
-env = { VIBE_ENABLE_TELEMETRY = "false", VIBE_ENABLE_UPDATE_CHECKS = "false", VIBE_EXPERIMENTS__ENABLE = "false", VIBE_INCLUDE_COMMIT_SIGNATURE = "false", TERM = "xterm-256color" }
+# BROWSER=true: makes Vibe's browser sign-in work from a box at all. It
+# opens the browser with Python's webbrowser.open and, when that returns
+# False, raises OPEN_BROWSER_FAILED (vibe/setup/auth/browser_sign_in.py:
+# 185-198) BEFORE the poll loop starts (authenticate, :92-103). A box has
+# no browser, so webbrowser.open returns False and the onboarding screen
+# shows "Failed to open browser for sign-in." -- yet keeps the URL and its
+# `c` copy binding (vibe/setup/onboarding/screens/browser_sign_in.py:119),
+# so the user signs in on the host and nothing in the box ever polls.
+# webbrowser honours $BROWSER: with BROWSER=true it runs `true <url>` and
+# returns True, the service polls console.mistral.ai (every 3 s,
+# browser_sign_in.py:67), and after 4 s the screen shows "If your browser
+# did not open, copy this URL" (screens/browser_sign_in.py:46-54), `c`
+# copies it. Box-wide, not just in the login wrappers (which export it too,
+# for byre shell): Vibe's own first-run onboarding runs when the agent
+# launches with no key (require_api_key_or_onboard, vibe/cli/cli.py:
+# 104-123) and would hit the same abort. Vibe's other browser openers, the
+# connector / MCP OAuth widgets (vibe/cli/textual_ui/widgets/
+# connector_auth_app.py:183-188, mcp_oauth_app.py:185-190), ignore the
+# return value and offer copy / show-URL options, so this is harmless
+# there -- except that their "Opened in browser." status becomes
+# inaccurate (nothing opened; copy the URL instead).
+env = { VIBE_ENABLE_TELEMETRY = "false", VIBE_ENABLE_UPDATE_CHECKS = "false", VIBE_EXPERIMENTS__ENABLE = "false", VIBE_INCLUDE_COMMIT_SIGNATURE = "false", TERM = "xterm-256color", BROWSER = "true" }
 # byre holds each env_docs value to one line, <=300 bytes; the longer
 # guidance lives in context.md. MISTRAL_API_KEY is the mistral provider's
 # api_key_env_var (DEFAULT_MISTRAL_API_ENV_KEY, vibe/core/config/
@@ -174,7 +198,7 @@ target = "/home/dev/.vibe"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "b61b48095451987a3434a0a0443ba437b1e502d775a728b23fb5ec44b3b618d5"
+sha256 = "b9c0c8bd9e78485ab30260a417ab474919fa8a5cc8a2cc1121b388e339c0dbcd"
 
 [[package.files]]
 src = "vibe-launch.sh"
@@ -184,10 +208,10 @@ sha256 = "2c175bdc9bf258c695282d9290d86c0c3daf1d2ce06dd0fe4a4b005ef709dcdc"
 [[package.files]]
 src = "vibe-login-cmd.sh"
 dest = "vibe-login-cmd.sh"
-sha256 = "f4cf2c15a38d873b61c9070710f7ac79c18e7d8a8b72c6a62ce1bc6dc7fe1d71"
+sha256 = "3ecf8f1461bd09ac4335495517059ef0dab96bbe97bd1902e2197ca48709d5d5"
 
 [[package.files]]
 src = "vibe-login.sh"
 dest = "vibe-login.sh"
-sha256 = "803bff9dbf6438124e757b3bf890578f5136754a1252b6aae0527d62136be875"
+sha256 = "353243fa9286f9eb5159c54c02b2b1bfc1aaf6ebb2ed4c0fca1bae41285da340"
 

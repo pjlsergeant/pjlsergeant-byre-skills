@@ -35,7 +35,8 @@ if [ -L "$envfile" ] || { [ -e "$envfile" ] && [ ! -f "$envfile" ]; }; then
   exit 1
 fi
 
-echo "Choose 'Launch browser' and open the sign-in URL it shows in a browser on your HOST,"
+echo "Choose 'Launch browser' and open the sign-in URL it shows in a browser on your HOST"
+echo "(the URL appears after a few seconds; press 'c' to copy it),"
 echo "or 'Use an API key' and paste a Mistral API key (console.mistral.ai)."
 echo "Stored for this project only (~/.vibe/.env; it survives rebuilds)."
 if [ -n "${MISTRAL_API_KEY:-}" ]; then
@@ -43,4 +44,7 @@ if [ -n "${MISTRAL_API_KEY:-}" ]; then
 fi
 echo ""
 
+# No browser in a box: without this, Vibe's sign-in aborts before it ever
+# polls. Rationale and source refs: skill.toml [runtime], BROWSER=true.
+export BROWSER=true
 exec vibe --setup "$@"
