@@ -16,6 +16,7 @@ byre-codereview --continue "..."      # re-check after fixes (resumes the sessio
 byre-codereview --reviewer grok "..." # second opinion from grok instead
 byre-codereview --raw "prompt"        # your prompt verbatim (no built-in review prompt)
 byre-codereview --timeout 10m "..."   # give up after 10 minutes (exit 124)
+byre-codereview --no-tripwire "..."   # skip the tree-change check (slow on large repos)
 ```
 
 Prefer a reviewer that ISN'T the model driving this session: same-model review
@@ -64,6 +65,10 @@ appended to `.byre-devlog/reviews.md`. Reviewers may run cheap read-only probes
 to back up findings but never your test suite — green stays YOUR job — and must
 not touch the tree; the script warns if the working tree changed during a
 review (Python byte-code caches from a reviewer's probes are suppressed).
+On a large repository that check is slow (it diffs the whole tree and hashes
+every untracked file, before and after) and fires on any concurrent edit;
+`--no-tripwire` skips it, at the cost that a reviewer's write goes uncaught —
+the Running line and the reviews.md heading then say the tripwire was off.
 
 ### Fresh / blinded runs
 

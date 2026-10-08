@@ -12,6 +12,7 @@
 #   byre-codereview --reviewer grok "..."  # use grok as the reviewer
 #   byre-codereview --raw "prompt"         # your prompt verbatim, no review prompt
 #   byre-codereview --timeout 10m "..."    # give up (exit 124) after 10 minutes
+#   byre-codereview --no-tripwire "..."    # skip the tree-change check (large repos)
 #
 # BYRE_REVIEWER sets the default reviewer (codex when unset). A reviewer is
 # "harness" or "harness:model" — see the parsing below; every harness hands the
@@ -26,9 +27,10 @@
 #
 # --raw replaces the built-in review prompt entirely: the arguments become the
 # whole prompt (required). The mechanics stay — reviewer enforcement flags,
-# session resume, the tripwire, the reviews.md log (tagged "raw") — but the
-# execution policy below is only as strong as YOUR prompt, and the truncation
-# marker check is skipped since nothing mandates a "Probes run:" section.
+# session resume, the tripwire (unless --no-tripwire), the reviews.md log
+# (tagged "raw") — but the execution policy below is only as strong as YOUR
+# prompt, and the truncation marker check is skipped since nothing mandates a
+# "Probes run:" section.
 #
 # Review execution policy (the prompt below enforces it, the tripwire checks
 # it): the reviewer may run cheap, targeted, read-only probes to put evidence
@@ -36,7 +38,8 @@
 # the project's test suite (the author owns green; re-running it buys latency,
 # not evidence), and never anything that mutates the tree, git state, or shared
 # state. After every run the script re-hashes the working tree and warns loudly
-# if it changed (legibility, not a gate).
+# if it changed (legibility, not a gate) — unless --no-tripwire skipped it,
+# which the Running line and the reviews.md heading then say.
 set -euo pipefail
 
 usage() {
@@ -68,6 +71,9 @@ Usage:
                                          zai reviews through the isolated Z.AI Codex home (GLM)
   byre-codereview --timeout <duration>   give up after <duration> and exit 124, e.g. --timeout 10m
                                          (coreutils timeout syntax: 90, 90s, 2.5m, 1h; 0 = none)
+  byre-codereview --no-tripwire ...      skip the working-tree change check (large repos: it diffs the
+                                         whole tree and hashes every untracked file, before and after;
+                                         a reviewer's writes then go uncaught, and the run says so)
   byre-codereview --raw "prompt"         send YOUR prompt verbatim (skips the
                                          built-in review prompt; mechanics stay)
   byre-codereview --raw -- "--anything"  -- ends option parsing, so option-shaped
@@ -81,6 +87,12 @@ EOF
 REVIEWER="${BYRE_REVIEWER:-codex}"
 CONTINUE=false
 RAW=false
+# --no-tripwire: for large repos, where the tree snapshot diffs the whole tree
+# and hashes every untracked file twice (before and after), and where
+# concurrent work fires it spuriously. The trade: a reviewer write goes
+# uncaught, so the run says so on its Running line and in reviews.md. Flag
+# only, no env default: off should be a per-run choice someone can see.
+TRIPWIRE=true
 TIMEOUT="${BYRE_REVIEW_TIMEOUT:-}"
 timeout_flag=false
 FOCUS=()
@@ -106,6 +118,7 @@ for arg in "$@"; do
     -h|--help) usage; exit 0 ;;
     --continue) CONTINUE=true ;;
     --raw) RAW=true ;;
+    --no-tripwire) TRIPWIRE=false ;;
     --reviewer) expect_reviewer=true ;;
     --reviewer=*) REVIEWER="${arg#--reviewer=}" ;;
     --timeout) expect_timeout=true; timeout_flag=true ;;
@@ -388,14 +401,16 @@ save_session() { printf '%s\n%s\n' "$1" "$REVIEWER" > "$SESSION_FILE"; }
 # harness, matching the reviews.md heading.
 if [ "$RAW" = true ]; then RUN_NOTE=" (raw)"; else RUN_NOTE="${FOCUS:+ (focus: ${FOCUS[*]})}"; fi
 TIMEOUT_NOTE="${TIMEOUT:+ (timeout: $TIMEOUT)}"
-announce_fresh()  { echo "Running code review (${REVIEWER})${RUN_NOTE}${TIMEOUT_NOTE} — this may take several minutes..."; }
-announce_resume() { echo "Continuing previous review session (${REVIEWER})${TIMEOUT_NOTE} — this may take several minutes..."; }
+# TRIPWIRE_NOTE rides both lines too: an unpoliced run must say so up front.
+TRIPWIRE_NOTE=""
+[ "$TRIPWIRE" = true ] || TRIPWIRE_NOTE=" (tripwire: off)"
+announce_fresh()  { echo "Running code review (${REVIEWER})${RUN_NOTE}${TIMEOUT_NOTE}${TRIPWIRE_NOTE} — this may take several minutes..."; }
+announce_resume() { echo "Continuing previous review session (${REVIEWER})${TIMEOUT_NOTE}${TRIPWIRE_NOTE} — this may take several minutes..."; }
 
 read -r -d '' PROMPT <<'EOF' || true
 You are PURELY a code-review agent: you review, the author fixes. Do not modify
 anything — not the working tree, not git state, not credentials or other shared
-state. The working tree is re-checked after your run; a reviewer that mutates
-the tree contaminates the thing under review.
+state. @TRIPWIRE_SENTENCE@
 
 NEVER run an authentication command of any CLI — no `login`, `logout`, `auth`,
 or credential-writing subcommand, not even to check whether something works.
@@ -434,10 +449,20 @@ and whether you verified it. End the report with a "Probes run:" list of any
 commands you executed beyond the git reads above ("none" if none). Give the
 full report as your final message.
 EOF
+# The heredoc is quoted so its backticks stay literal, hence the placeholder:
+# the prompt must not claim a working-tree check the run skips under
+# --no-tripwire (found by zai and mimo reviews 2026-10-08).
+if [ "$TRIPWIRE" = true ]; then
+  sentence="The working tree is re-checked after your run; a reviewer that mutates the tree contaminates the thing under review."
+else
+  sentence="This run does NOT re-check the working tree afterwards (--no-tripwire), so nothing will catch a write — the prohibition stands regardless; a reviewer that mutates the tree contaminates the thing under review."
+fi
+PROMPT="${PROMPT/@TRIPWIRE_SENTENCE@/$sentence}"
 
 if [ "$RAW" = true ]; then
   # --raw: the arguments ARE the prompt. The enforcement flags and tripwire
-  # still apply; the policy the built-in prompt encodes does not.
+  # (unless --no-tripwire) still apply; the policy the built-in prompt
+  # encodes does not.
   PROMPT="${FOCUS[*]}"
 elif [ "${#FOCUS[@]}" -gt 0 ]; then
   PROMPT="$PROMPT
@@ -524,8 +549,9 @@ tree_state() {
 }
 # Fail open but SAY so: without sha256sum every snapshot is empty and the
 # tripwire can't fire. All supported bases ship coreutils, so this is a
-# one-line legibility note, not machinery.
-command -v sha256sum >/dev/null 2>&1 \
+# one-line legibility note, not machinery. Silent under --no-tripwire: a note
+# about something already off is noise.
+[ "$TRIPWIRE" = false ] || command -v sha256sum >/dev/null 2>&1 \
   || echo "byre-codereview: note — sha256sum missing, the tree tripwire is disabled." >&2
 # Every harness, before any reviewer runs (their children inherit it): a
 # reviewer may legitimately import the code under review to verify a
@@ -535,13 +561,14 @@ command -v sha256sum >/dev/null 2>&1 \
 # this tripwire. Only Python honours it; other toolchains' caches are not
 # covered (unverified whether any reviewer probe has tripped one).
 export PYTHONDONTWRITEBYTECODE=1
-PRE_STATE=$(tree_state)
 # The observe-don't-mutate tripwire. A warning, not a rollback: byre's job is
 # to make the violation legible, the human decides what to do with it. Fires
 # on any tree change during the run — including a concurrent session's edits —
 # so it names both possibilities. Installed as an EXIT trap so it also runs on
 # the FAILURE paths: a run that mutates the tree and then dies is exactly the
-# contamination case this exists for.
+# contamination case this exists for. --no-tripwire skips the snapshot (the
+# expensive half) and never installs the trap; this is the script's only EXIT
+# trap, so nothing else rides on it.
 check_tripwire() {
   [ "$(tree_state)" = "$PRE_STATE" ] && return 0
   {
@@ -552,7 +579,10 @@ check_tripwire() {
     echo "  acting on these findings."
   } >&2
 }
-trap check_tripwire EXIT
+if [ "$TRIPWIRE" = true ]; then
+  PRE_STATE=$(tree_state)
+  trap check_tripwire EXIT
+fi
 
 # Append the captured findings to the review log with a timestamp + reviewer.
 # A run that died mid-review can leave a plausible-looking fragment (grok's
@@ -593,7 +623,9 @@ record_review() {
   fi
   raw_tag=""
   [ "$RAW" = true ] && raw_tag=", raw"
-  { printf '\n## %s (%s%s)%s\n\n' "$(date -u +%FT%TZ)" "$REVIEWER" "$raw_tag" "$note"; cat "$OUT"; } >> "$LOG_FILE"
+  tripwire_tag=""
+  [ "$TRIPWIRE" = true ] || tripwire_tag=", no tripwire"
+  { printf '\n## %s (%s%s%s)%s\n\n' "$(date -u +%FT%TZ)" "$REVIEWER" "$raw_tag" "$tripwire_tag" "$note"; cat "$OUT"; } >> "$LOG_FILE"
 }
 
 extract_codex_session() {

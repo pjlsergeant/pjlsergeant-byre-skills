@@ -34,7 +34,7 @@ claude, opencode, zai, mimo, and vibe, each taking a model as
 `<harness>:<model>` (e.g. `codex:gpt-5.6-sol`, `claude:opus`).
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.16/skills/codereview/skill.toml --digest sha256:3974128a244ec772dc92e5848a3cafac7ca2018373665f8e54d9d9b9ae35447b
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.19/skills/codereview/skill.toml --digest sha256:45b8c9fcb2232ca08e5e2c63b4e010fbc65a8dd57aad1e370966a38514b9916b
 ```
 
 ### pjlsergeant/toolbox
