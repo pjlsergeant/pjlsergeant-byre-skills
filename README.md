@@ -131,7 +131,7 @@ domain is restricted, treat names as public and expose only throwaway
 services there.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.20/skills/prok/skill.toml --digest sha256:DIGEST-TO-FILL
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.20/skills/prok/skill.toml --digest sha256:0ae52072eef9a1595a9fcb01f0556818ab142bb0cc030c962afbed3af22521d9
 ```
 
 ### pjlsergeant/mimo
