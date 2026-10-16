@@ -120,14 +120,18 @@ byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byr
 
 ### pjlsergeant/prok
 
-The `frpc` client for a self-hosted prok relay, which gives a box a public
-`https://<name>.<relay>` URL while it stays connected. Enable with
-`skills = ["pjlsergeant/prok"]`, set `PROK_RELAY`, supply `PROK_AUTHTOKEN`
-via `byre credentials set` or `env_from_host`, and allow egress to the relay.
-Names are public the moment they come up: only expose throwaway services.
+The `frpc` client for a self-hosted prok relay, which gives a box an
+`https://<name>.<relay>` URL -- or any full hostname the relay serves --
+while it stays connected. Enable with `skills = ["pjlsergeant/prok"]`, set
+`PROK_RELAY` (and optionally `PROK_KNOWN_DOMAINS`, the relay's other
+domains), supply `PROK_AUTHTOKEN` via `byre credentials set` or
+`env_from_host`, and allow egress to the relay. Who can reach a hostname is
+the relay operator's call per domain; unless your project guidance says a
+domain is restricted, treat names as public and expose only throwaway
+services there.
 
 ```
-byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.9/skills/prok/skill.toml --digest sha256:04ef44e401768532c9370aa971e53b9903ae2d3f643ac0d4dfe830983f29fa9f
+byre skill install https://raw.githubusercontent.com/pjlsergeant/pjlsergeant-byre-skills/v1.0.20/skills/prok/skill.toml --digest sha256:DIGEST-TO-FILL
 ```
 
 ### pjlsergeant/mimo

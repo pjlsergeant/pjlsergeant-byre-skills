@@ -1,7 +1,8 @@
 #!/bin/sh
-# prok -- expose a local port at https://<name>.$PROK_RELAY via the prok
-# relay (frps behind Cloudflare, spoken to with frpc over wss:443). The
-# name lives exactly as long as the tunnel process does.
+# prok -- expose a local port at https://<name>.$PROK_RELAY (or at any
+# hostname the relay serves, given in full) via the prok relay, spoken
+# to with frpc over wss:443. The hostname lives exactly as long as the
+# tunnel process does.
 #
 # Run bare for the docs. Wraps frpc because raw frpc has two traps this
 # script closes: a taken name is only a log warning (frpc stays up,
@@ -15,12 +16,13 @@ STATE="${TMPDIR:-/tmp}/prok.$(id -u)"
 
 docs() {
   cat <<EOF
-prok -- claim https://<name>.\$PROK_RELAY while a tunnel process lives
+prok -- claim a hostname on the relay while a tunnel process lives
 
 usage:
-  prok up <name> <port> [user:pass]   expose localhost:<port> as <name>
-  prok status [<name>]                each tunnel: name, URL, state
-  prok down [<name>]                  kill tunnel(s), releasing the name(s)
+  prok up <name> <port> [user:pass]       expose localhost:<port> as https://<name>.\$PROK_RELAY
+  prok up <hostname> <port> [user:pass]   ... as https://<hostname> (a full name the relay serves)
+  prok status [<name|hostname>]           each tunnel: hostname, URL, state
+  prok down [<name|hostname>]             kill tunnel(s), releasing the hostname(s)
 
 up runs in the foreground: the name is claimed while the process lives
 and released the moment it dies. It prints the public URL once the relay
@@ -31,20 +33,32 @@ after startup, so a name lost across a reconnect also kills the tunnel
 loudly instead of lurking.
 
 rules:
-  - <name>: one lowercase DNS label ([a-z0-9-], no dots, max 63 chars).
-    Unique across ALL clients of the relay.
-  - Names are PUBLIC and guessable the moment the proxy starts; scanners
-    find new hostnames in minutes. Only expose throwaway services, add a
-    random suffix, and gate anything sensitive with [user:pass] -- the
-    relay then answers 401 without credentials (HTTP basic auth,
-    enforced relay-side, no setup).
+  - <name>: one lowercase DNS label ([a-z0-9-], max 63 chars); it comes
+    up at <name>.\$PROK_RELAY. A <hostname> (lowercase labels joined by
+    dots) is claimed exactly as given; which domains the relay actually
+    serves is the relay operator's business -- a hostname on a domain
+    the relay does not route is accepted and shows "running", but
+    nothing answers it. PROK_KNOWN_DOMAINS (optional, comma-separated)
+    makes prok warn about such a domain. Hostnames are unique across
+    ALL clients of the relay.
+  - Who can reach a hostname depends on how the relay operator set up
+    its domain. Unless your project guidance says otherwise, assume
+    anyone can: scanners find new hostnames in minutes, so add a random
+    suffix and gate anything sensitive with [user:pass] -- the relay
+    then answers 401 without credentials (HTTP basic auth, enforced
+    relay-side, no setup).
   - HTTP only (websockets fine); no raw TCP/UDP.
 
 environment (required):
   PROK_AUTHTOKEN  shared secret (a credential: set via
                   \`byre credentials set\` or env_from_host, never a
                   baked [env] literal)
-  PROK_RELAY      relay base hostname; egress is <relay>:443 only
+  PROK_RELAY      relay base hostname; bare names come up under it;
+                  the control channel is <relay>:443
+
+environment (optional):
+  PROK_KNOWN_DOMAINS  comma-separated domains the relay serves besides
+                  PROK_RELAY; a hostname outside them gets a warning
 
 state lives under $STATE (config, pid, log per tunnel); configs hold no
 secrets -- frpc resolves the token from the environment at connect time.
@@ -102,7 +116,7 @@ clear_state() {
 
 up() {
   name="${1:-}"; port="${2:-}"; auth="${3:-}"
-  [ -n "$name" ] && [ -n "$port" ] || die "usage: prok up <name> <port> [user:pass]"
+  [ -n "$name" ] && [ -n "$port" ] || die "usage: prok up <name|hostname> <port> [user:pass]"
   # grep matches per line, so an embedded newline would smuggle a bad
   # line past the pattern (and into filenames and the TOML) -- reject
   # newlines in every argument first.
@@ -111,8 +125,38 @@ up() {
   case "$name$port$auth" in *"$nl"*) die "arguments must not contain newlines" ;; esac
   # printf, not echo: dash's echo expands backslash escapes, so a name
   # holding a literal \n would reach grep as two lines.
-  printf '%s\n' "$name" | grep -Eq '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' \
-    || die "bad name '$name': one lowercase DNS label ([a-z0-9-], no dots, max 63 chars)"
+  printf '%s\n' "$name" | grep -Eq '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$' \
+    && [ "${#name}" -le 253 ] \
+    || die "bad name '$name': lowercase DNS labels ([a-z0-9-], max 63 chars each), joined by dots"
+  need_env
+  # A bare label lives under the relay host; a dotted name is a full
+  # hostname, claimed as given. The hostname is the proxy NAME too (the
+  # relay keys every proxy by name, whatever domain it is on, so the
+  # label alone would collide across domains) and the key of all state
+  # below. frp has two proxy forms: a `subdomain` under the relay's own
+  # domain, or `customDomains` for anything else.
+  case "$name" in
+    *.*) host="$name" ;;
+    *)   host="$name.$PROK_RELAY" ;;
+  esac
+  case "$host" in
+    *".$PROK_RELAY")
+      label="${host%".$PROK_RELAY"}"
+      case "$label" in
+        *.*) proxyline="customDomains = ['$host']" ;;   # a.b.<relay>: frp refuses it, and says so
+        *)   proxyline="subdomain = '$label'" ;;
+      esac ;;
+    *) proxyline="customDomains = ['$host']" ;;
+  esac
+  if [ -n "${PROK_KNOWN_DOMAINS:-}" ]; then
+    domain="${host#*.}"
+    case ",$PROK_RELAY,$(printf '%s' "$PROK_KNOWN_DOMAINS" | tr -d ' ')," in
+      *",$domain,"*) ;;
+      *) printf 'prok: warning: %s is not a known relay domain (PROK_RELAY=%s, PROK_KNOWN_DOMAINS=%s); the relay will accept %s but nothing may answer it\n' \
+           "$domain" "$PROK_RELAY" "$PROK_KNOWN_DOMAINS" "$host" >&2 ;;
+    esac
+  fi
+  name="$host"
   printf '%s\n' "$port" | grep -Eq '^[0-9]+$' && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] \
     || die "bad port '$port'"
   authlines=""
@@ -129,7 +173,7 @@ httpPassword = '$p'" ;;
       *) die "auth must be user:pass" ;;
     esac
   fi
-  need_env; need_bin
+  need_bin
   mkdir -p "$STATE" && chmod 700 "$STATE"
 
   # $name.pid marks ownership from BEFORE frpc starts: the wrapper's pid
@@ -183,7 +227,7 @@ webServer.port = $admin
 [[proxies]]
 name = '$name'
 type = "http"
-subdomain = '$name'
+$proxyline
 localPort = $port
 $authlines
 EOF
@@ -224,7 +268,7 @@ EOF
           printf '%s\n' "$pid" > "$pidfile.new" && mv "$pidfile.new" "$pidfile"
           echo "$admin" > "$STATE/$name.admin"
           drop
-          printf 'https://%s.%s\n' "$name" "$PROK_RELAY"
+          printf 'https://%s\n' "$name"
           [ -n "$auth" ] && printf '(basic auth: %s:...)\n' "${auth%%:*}"
           trap 'kill "$pid" 2>/dev/null' INT TERM HUP
           # Keep watching: after a reconnect (relay restart, network
@@ -273,8 +317,19 @@ EOF
   fail "no free admin port in 7400-7449"
 }
 
+# A bare label given to status/down means <label>.$PROK_RELAY, as in up;
+# only that case needs PROK_RELAY, so `prok down` works with no env at all.
+resolve() {
+  case "$1" in
+    ""|*.*) printf '%s' "$1" ;;
+    *) [ -n "${PROK_RELAY:-}" ] || return 1
+       printf '%s.%s' "$1" "$PROK_RELAY" ;;
+  esac
+}
+no_relay() { die "PROK_RELAY is not set -- needed to resolve the bare name '$1' (or give the full hostname)"; }
+
 status() {
-  only="${1:-}"; need_env; found=1; rc=0
+  need_env; only="$(resolve "${1:-}")" || no_relay "$1"; found=1; rc=0
   for pidf in "$STATE"/*.pid; do
     [ -f "$pidf" ] || continue
     name="$(basename "$pidf" .pid)"
@@ -282,7 +337,7 @@ status() {
     found=0
     pid="$(cat "$pidf")"
     if ! alive "$pid"; then
-      printf '%s\thttps://%s.%s\tdead (stale state removed)\n' "$name" "$name" "$PROK_RELAY"
+      printf '%s\thttps://%s\tdead (stale state removed)\n' "$name" "$name"
       # Re-check under the lock: a replacement `up` may own it by now.
       ( flock -w 2 9 || exit
         p="$(cat "$pidf" 2>/dev/null)"
@@ -294,9 +349,9 @@ status() {
     state="$(curl -s --max-time 2 "http://127.0.0.1:${admin:-0}/api/status" | proxy_state "$name")"
     st="${state%%	*}"; err="${state#*	}"
     case "$st" in
-      running) printf '%s\thttps://%s.%s\trunning\n' "$name" "$name" "$PROK_RELAY" ;;
-      "") printf '%s\thttps://%s.%s\tstarting (admin API not answering yet)\n' "$name" "$name" "$PROK_RELAY"; rc=1 ;;
-      *) printf '%s\thttps://%s.%s\t%s\n' "$name" "$name" "$PROK_RELAY" "$st${err:+ ($err)}"; rc=1 ;;
+      running) printf '%s\thttps://%s\trunning\n' "$name" "$name" ;;
+      "") printf '%s\thttps://%s\tstarting (admin API not answering yet)\n' "$name" "$name"; rc=1 ;;
+      *) printf '%s\thttps://%s\t%s\n' "$name" "$name" "$st${err:+ ($err)}"; rc=1 ;;
     esac
   done
   if [ "$found" -ne 0 ]; then
@@ -307,7 +362,7 @@ status() {
 }
 
 down() {
-  only="${1:-}"; hit=1
+  only="$(resolve "${1:-}")" || no_relay "$1"; hit=1
   for pidf in "$STATE"/*.pid; do
     [ -f "$pidf" ] || continue
     name="$(basename "$pidf" .pid)"

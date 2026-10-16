@@ -1,10 +1,10 @@
 [package]
 id = "pjlsergeant/prok"
-version = "1.0.0"
+version = "1.1.0"
 kind = "skill"
 package_api = 1
 requires_byre = ">=0.1.10"
-description = "prok, a self-hosted ngrok: claim https://<name>.<relay> for as long as the tunnel process lives. Ships frpc plus a `prok` wrapper (up/status/down) that fails fast on taken names via frpc's admin API. Auth and relay host come from PROK_AUTHTOKEN / PROK_RELAY at use time."
+description = "prok, a self-hosted ngrok: claim https://<name>.<relay>, or any full hostname the relay serves, for as long as the tunnel process lives. Ships frpc plus a `prok` wrapper (up/status/down) that fails fast on taken names via frpc's admin API. Auth and relay host come from PROK_AUTHTOKEN / PROK_RELAY at use time; PROK_KNOWN_DOMAINS (optional) lists the relay's other domains."
 
 [build]
 # frp isn't packaged for Debian, so this fetches fatedier/frp's release
@@ -51,6 +51,7 @@ dockerfile = [
 # the templating and nothing-on-7000 detail.
 env_docs.PROK_AUTHTOKEN = "prok shared secret, required. A credential: prefer `byre credentials set PROK_AUTHTOKEN` or env_from_host over a baked [env] literal. Mint it from letters, digits, - and _ only: frpc splices it into its config as raw text, so a quote or newline in the token breaks parsing."
 env_docs.PROK_RELAY = "prok relay base hostname, required; not a secret (tunnels come up at https://<name>.<this host>). With a network-posture skill enabled the project config must also open the door: egress = [\"<this host>\"] -- the control channel is a WebSocket to it on 443."
+env_docs.PROK_KNOWN_DOMAINS = "optional, comma-separated: the other domains the relay serves (a full hostname given to `prok up` on any other domain gets a warning -- the relay accepts it but nothing may answer). Not a secret; a plain [env] value is fine. PROK_RELAY is always known."
 
 [context]
 file = "context.md"
@@ -59,10 +60,10 @@ file = "context.md"
 [[package.files]]
 src = "context.md"
 dest = "context.md"
-sha256 = "2c4a8352639f1e2500722d94f0c995577ba7c4c8b95abd11264dc8cfb4fb0629"
+sha256 = "e2b0f503ccde7e89c7cf6d888287805015a3c37e545691b390ac15852c5edc1a"
 
 [[package.files]]
 src = "prok"
 dest = "prok"
-sha256 = "b6c7e137362a244b4a2210a4d5c879606095104c6e25cbe7a73247bdfbdcd87f"
+sha256 = "d1aa5c4e4cc73bfad7e805fac0817ec715f5cab0f85afb9fcdd2a3383b3d3b63"
 
